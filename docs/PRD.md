@@ -73,7 +73,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | P1 | One strategy code path | A bot moves between BACKTEST, PAPER and live by stage change only. From S2, research (vectorbt) and bar-replay must produce identical trade lists (timestamp, side, qty), with an absolute difference in cumulative net return of 0.1 pp or less. |
 | P2 | Low operating burden | 15 min/day or less on normal days. Login takes 1 minute or less. No manual steps in data ingestion. |
 | P3 | State integrity | A reconciliation mismatch sets HALTED within 60 s of detection (E4). Zero duplicate orders (E5). |
-| P4 | Compliance by construction | Zero broker or exchange rejections caused by platform behaviour (market orders, rate limits, wrong IP, product type). |
+| P4 | Compliance by construction | Zero broker or exchange rejections caused by platform behaviour (market orders, rate limits, wrong IP, product type), counted from BROKER_REJECTED events whose broker reason falls in those classes. Any such event is an `execution` mistake (L2) and a bug. |
 | P5 | Cost | ₹5,000/month or less; target about ₹2,050 in S1 (§13.8). |
 
 ### 4.3 Trading goals (live portfolio)
@@ -82,7 +82,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 |---|---|---|
 | T1 | Beat the benchmark | Portfolio return after costs and tax beats **RM** over the evaluation window, and factor bots also beat their **PF**. BH is reported. The S1 ETF trend bot is a drawdown-control strategy and is **expected to lag BH on return** (Appendix A.5). It is judged on RM and on the drawdown it saves. |
 | T2 | Drawdown | **Hard limit: 15% epoch drawdown from peak NAV** (K0). The governor halts at −12% on both the reference peak and the epoch peak (K1), leaving a 3 pp buffer for price gaps. |
-| T3 | Live matches expectation | **Execution:** slippage_bps = signed (fill − mid at first placement) / mid × 10⁴, positive when adverse. Median ≤ R4 model + 2 bps, and no single fill above 3× the model. **Returns:** rolling 60-session Sharpe and 60-session return stay within the 5th–95th percentile band of the expectation model (§10.1). |
+| T3 | Live matches expectation | **Execution:** slippage_bps = signed (fill − mid at first placement) / mid × 10⁴, positive when adverse. Median ≤ R4 model + 2 bps, and no single fill above 3× the model. **Returns:** rolling 60-session Sharpe and 60-session return are compared with the 5th–95th percentile band of the expectation model (§10.1) at every session close. Sharpe below the 5th percentile demotes the bot (K7(1)); any other excursion, including results above the 95th percentile, is alerted and journaled as `regime` and takes no action. |
 
 ## 5. Non-goals
 
@@ -200,7 +200,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **Bot drawdown** (K3, K7) = bot sub-ledger NAV / its running maximum since the bot last entered its current live stage − 1. In S1 it coincides with epoch drawdown, because the one bot's live stage and the epoch start together. | |
 | | **Epoch drawdown** = NAV / running maximum NAV since the current epoch began − 1. T2 and §10 use it, and it never resets within an epoch. | |
 | | **Epoch:** the first epoch starts at the first live order. A new epoch starts only through the CLI `new-epoch` command (after a K1 epoch breach), which is journaled, restarts the §10 12-month clock, and permanently keeps the failed epoch's result in reports. `new-epoch` is refused while any live sub-ledger holds units or any bot order is open, and a `cash-move` withdrawal is refused beyond the platform's cash. | |
-| K1 | **Portfolio drawdown governor** (MUST NOT be disableable), measured on NAV against the reference peak. Evaluated at every NAV mark: each live reconciliation at LTP, and the close in backtests. That timing difference is accepted and documented. A level is reached when drawdown ≤ its threshold (at or beyond it); thresholds are in percentage points of the reference peak, and each level's release rule is stated with it below. A NAV mark uses quotes at most 60 s old; a mark on older quotes is recorded as stale, never triggers or releases a level, and 5 consecutive stale marks raise an alert. | S1 |
+| K1 | **Portfolio drawdown governor** (MUST NOT be disableable: no config key, CLI command or environment variable turns it off, and the only way to stop it is to stop the gateway, which also stops every order), measured on NAV against the reference peak. Evaluated at every NAV mark: each live reconciliation at LTP, and the close in backtests. That timing difference is accepted and documented. A level is reached when drawdown ≤ its threshold (at or beyond it); thresholds are in percentage points of the reference peak, and each level's release rule is stated with it below. A NAV mark uses quotes at most 60 s old; a mark on older quotes is recorded as stale, never triggers or releases a level, and 5 consecutive stale marks raise an alert. | S1 |
 | | At −6% (`governor.halve`): the bot's effective `max_exposure` is multiplied by 0.5, both in the target ₹ formula (§11.1) and in the K4(b) cap. It is released only when drawdown recovers above `governor.halve_release` (default −3%), not at −6%, so that NAV oscillating around the threshold cannot produce a trim, a top-up and another trim in successive sessions (OD-5). The halving applies to the target, not to individual orders. | |
 | | At −10%: **REDUCING**. | |
 | | At **−12%: HALTED plus an automatic flatten to cash** (A5). | |
@@ -300,7 +300,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | ID | Requirement | Slice |
 |---|---|---|
 | A1 | **Stages per bot:** BACKTEST → PAPER → APPROVE → AUTO. | S1 (up to APPROVE) |
-| | The platform MUST refuse a promotion unless a **gate-evidence record** exists in `live.sqlite` for that bot and transition, holding the §10 criteria and their values, signed off by the owner in the CLI. | |
+| | The platform MUST refuse a promotion unless a **gate-evidence record** exists in `live.sqlite` for that bot and transition, holding one row per §10 criterion (criterion id, measured value, threshold, pass or fail, and an evidence reference: journal row ids or a report path), signed off by the owner in the CLI. | |
 | | Demotions need no record. | |
 | | **Exception:** CLI `promote --research <bot>` may create a Backtest → Paper record flagged `research_only`. The record shows the failed criteria values and is signed off by the owner. It allows the PAPER stage only. Paper → Approve MUST be refused for any bot whose current Backtest → Paper record is `research_only`. | |
 | A2 | **APPROVE flow** for risk-increasing intents. | S1 |
@@ -360,7 +360,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **(c) Token:** the bot token is a secret. HTTP 409 conflicts or unexpected `getUpdates` gaps raise an alert, because they suggest another poller has the token. | |
 | | **(d) 2-step:** the owner's Telegram account MUST have 2-step verification. | |
 | | **(e) CLI-only:** leaving REDUCING or HALTED, raising limits, promotions and config changes can only be done from the CLI over SSH. | |
-| | **(f) Rate:** stay under about 1 message per second per chat. | |
+| | **(f) Rate:** stay under 1 message per second per chat. | |
 | M2 | **Reports.** Daily Telegram summary: positions, P&L after costs, drawdown, state and flags, and tomorrow's pending intents. The monthly report arrives in S2: per bot and portfolio, after costs and after tax, against RM/BH/PF, with tracking against the expectation model. | S1 → S2 |
 | M3 | **Health checks:** token validity, data freshness, missed scheduled jobs, egress IP, clock synchronisation (NTP offset 1 s or less). An **external dead-man heartbeat** (e.g., healthchecks.io free tier) alerts by Telegram or email if the daily pipeline or the poller stops checking in. Disk and error-rate checks come in S2. | S1 → S2 |
 | M4 | Web dashboard. | Parked (trigger: owner request only) |
@@ -425,6 +425,7 @@ For each bot, take the daily OOS returns from its R5 walk-forward (risk-free rat
 
 - **Expected** = the median of each distribution.
 - **Band** = the 5th to 95th percentiles.
+- **Computation:** Sharpe = mean / standard deviation of daily NAV returns over the 60-session window, annualised by √252, risk-free rate 0; the 60-session return is the compounded NAV return over the window. The live computation and the expectation model MUST share one function, and the live series is the bot's sub-ledger NAV (the portfolio NAV in S1).
 
 T3 and K7 use this model. For a bot that is often in cash, the distribution naturally includes flat periods.
 
@@ -434,10 +435,10 @@ A1 enforces every promotion through a recorded gate-evidence record.
 
 | Transition | Entry criteria (all required) |
 |---|---|
-| **Backtest → Paper** | (1) R5 chained OOS return after costs and tax (R7) beats **RM**; factor bots must also beat **PF**. (2) The governed backtest's **epoch max drawdown** (K0, over the whole backtest) is ≤ `risk.max_drawdown_pct`, and the governor never reaches HALTED. (3) All trials are logged in R5; DSR is reported from S3 (R10). (4) From S2, parity per P1. |
-| **Paper → Approve** | (1) At least 2 months of paper; bots with `planned_turnover` above 50/yr also need at least 50 paper trades. (2) Execution checklist completed, naturally or through A6 paper drills: order placed and filled; a rejection handled; clean reconciliation; a process restart survived; a holiday handled; a corporate action booked (if relevant). (3) Paper slippage within T3, measured at real quotes (E3). (4) Prerequisites: DDPI active (C9); static IP registered and egress check passing (E8); E9 GTT place/modify/delete and Kite TTL validity verified in A6; backup restore drilled (C7); **OD-7 decision recorded with the CA's name and date**. (5) A6 live smoke test completed, ending flat, with fills within T3. |
-| **Approve → Auto** | At least 4 weeks and at least 5 approved live orders. Zero unexplained reconciliation mismatches. `/halt` and `/flatten` each executed at least once on the live account (the A6 smoke-test drills count), with a journaled drill record. AUTO itself is parked (S4). |
-| **Capital scale-up** | (1) **At least 12 months live in the current epoch,** counted from the latest date the portfolio entered APPROVE or AUTO. Any all-bots demotion to PAPER, or a new epoch, restarts the clock. The window MUST contain a **full cycle**: at least one Nifty 50 drawdown of 8% or more from peak; if not, extend until it does. (2) Return after costs and tax above **RM** (factor bots also above PF; BH reported). (3) **Epoch max drawdown under 15%** (K0). (4) Live results inside the §10.1 band. (5) **Live DSR on excess return over RM ≥ 0.95,** with the registry trial count (R10). Then ramp capital in 1.5–2× steps, re-gating each step. Caveat: 12 months of daily data confirms only a true Sharpe of about 1.65 or higher *against zero* (Appendix A.4). Against a benchmark, the excess-return bar is higher, and more bots raise it further, so criterion (5) can take longer than 12 months. |
+| **Backtest → Paper** | (1) R5 chained OOS return after costs and tax (R7), measured over the union of the OOS test windows, is strictly greater than **RM** computed over the same dates; factor bots must also beat **PF** the same way. (2) The governed backtest's **epoch max drawdown** (K0, over the whole backtest) is ≤ `risk.max_drawdown_pct`, and the governor never reaches HALTED. (3) All trials are logged in R5; DSR is reported from S3 (R10). (4) From S2, parity per P1. |
+| **Paper → Approve** | (1) At least 2 calendar months of paper, counted from the date of the Backtest → Paper gate record or of the K7 demotion switch; bots with `planned_turnover` above 50/yr also need at least 50 paper trades, a trade being a filled order. (2) Execution checklist completed, naturally or through A6 paper drills: order placed and filled; a rejection handled; clean reconciliation; a process restart survived; a holiday handled; a corporate action booked (if relevant). Each item is evidenced by a journal row referenced from the gate record. (3) Paper slippage within T3, measured at real quotes (E3). (4) Prerequisites: DDPI active (C9); static IP registered and egress check passing (E8); E9 GTT place/modify/delete and Kite TTL validity verified in A6; backup restore drilled (C7); Telegram 2-step verification confirmed by the owner (M1(d)); **OD-7 decision recorded with the CA's name and date**. (5) A6 live smoke test completed, ending flat, with fills within T3. |
+| **Approve → Auto** | At least 4 weeks in APPROVE and at least 5 approved intents that reached FILLED. Zero unexplained reconciliation mismatches. `/halt` and `/flatten` each executed at least once on the live account (the A6 smoke-test drills count), with a journaled drill record. AUTO itself is parked (S4). |
+| **Capital scale-up** | (1) **At least 12 months live in the current epoch,** counted from the latest date the portfolio entered APPROVE or AUTO. Any all-bots demotion to PAPER, or a new epoch, restarts the clock. The window MUST contain a **full cycle**: at least one Nifty 50 drawdown of 8% or more from peak; if not, extend until it does. (2) Return after costs and tax above **RM** (factor bots also above PF; BH reported). (3) **Epoch max drawdown under 15%** (K0). (4) No K7(1) demotion in the window, and the latest 60-session Sharpe and return inside the §10.1 band. (5) **Live DSR on excess return over RM ≥ 0.95,** with the registry trial count (R10). Then ramp capital in 1.5–2× steps, re-gating each step. Caveat: 12 months of daily data confirms only a true Sharpe of about 1.65 or higher *against zero* (Appendix A.4). Against a benchmark, the excess-return bar is higher, and more bots raise it further, so criterion (5) can take longer than 12 months. |
 | **Demotion** | Automatic per K7. |
 
 ## 11. Strategy roadmap
@@ -653,7 +654,7 @@ research:
 ### 13.7 Testing strategy
 
 - **Unit tests** for every pure function:
-  - strategy; cost calculator;
+  - strategy, including purity (same view → same output; the module imports nothing that does I/O); cost calculator;
   - governor: backtest re-entry, a second −12% leg after a reference-peak reset triggering the epoch breach, and the −6% halving applied to the target;
   - K4 checks: the (j) exemptions including intraday flatten outside the order window, and (k);
   - FIFO lots including external lots; calendar and settlement dates; NAV/units.
