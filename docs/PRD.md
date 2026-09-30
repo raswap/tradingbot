@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Version | v1.9 |
+| Version | v1.10 (hardened from v1.9; changes and decisions needed in Appendix B) |
 | Date | 2026-09-30 |
 | Owner / sole user | Platform owner: a salaried staff software engineer in India, working solo |
-| Status | For owner review, then handoff to the implementing system |
+| Status | Hardened draft for owner review, then handoff to the implementing system |
 | Self-contained | Yes. Every fact the design depends on is in this document, with sources in Appendix A. "§N" refers to a section of this PRD. |
 
 ---
@@ -13,7 +13,7 @@
 ## 0. How to read this document (for the implementing system)
 
 - **§1–§12** cover *what* to build and *why*. **§13** covers *how*, at an architectural level. **§14** is the build order. **§16** lists decisions still open and facts still unverified.
-- **Requirement IDs** (D1, K4, …) are stable; use them in plans and commits. The **Slice** column says when each is built. **"Parked"** means not scheduled until its named trigger fires.
+- **Requirement IDs** (D1, K4, …) are stable; use them in plans and commits. The **Slice** column says when each is built; **S1** there means S1a unless §14 lists the item under S1b. **"Parked"** means not scheduled until its named trigger fires.
 - **MUST / MUST NOT** mark hard requirements. Everything else is default behaviour unless the owner decides otherwise in §16.
 - **"(unverified)"** marks a fact that has not been confirmed from a primary source. Verify it before relying on it (§16.2).
 - **Dates** are estimates assuming 10–12 owner-hours a week (OD-1).
@@ -120,7 +120,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 5. **Gates up, automatic demotion down.** Promotion needs recorded evidence (A1). A breach demotes automatically (K7).
 6. **Never learn from pain.** Retraining runs on a calendar and is never triggered by losses. Every parameter or rule change counts as a trial.
 7. **Point-in-time truth.** Data is keyed by ISIN and free of survivorship and look-ahead bias.
-8. **Fail safe.** When in doubt, halt and cancel. Never deploy or roll back during market hours. Flattens (K1, `/flatten`, K7) never wait for a human, with two exceptions. (a) An E8 halt: placing orders from an unregistered IP is never allowed, so the owner flattens manually. (b) No valid broker session: the E9 GTT at the broker is the backstop. Strategy exits are also automatic, but they pause while the portfolio is HALTED by E4 or `/halt` (K5), because a reconciliation mismatch puts the ledger itself in doubt; the owner clears that halt from the CLI.
+8. **Fail safe.** When in doubt, halt and cancel. Never deploy or roll back during market hours. Flattens (K1, `/flatten`, K7) never wait for a human, with two exceptions. (a) An E8 halt: placing orders from an unregistered IP is never allowed, so the owner flattens manually. (b) No valid broker session: the E9 GTT at the broker is the backstop. Strategy exits are also automatic, but they pause while the portfolio is HALTED by a pausing cause (K5: E4, `/halt`, `backstop_fired`, `storage`), because the ledger itself is then in doubt; the owner clears that halt from the CLI.
 9. **No seams before the second implementation.** An abstraction is extracted only when a second implementation exists. The broker interface is justified from S1, because the paper broker and Kite are its two implementations.
 
 ## 8. Functional requirements
@@ -130,7 +130,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | ID | Requirement | Slice |
 |---|---|---|
 | D1 | **Daily bhavcopies:** ingest NSE UDiFF bhavcopies into Parquet, keyed by **ISIN**: a one-off backfill of every UDiFF file from 8 Jul 2024, then incrementally. Each run fetches every session since the last stored one (D2), so a late or failed day is backfilled at the next run rather than skipped. Reject any file whose internal trade date differs from the expected session (third-party downloaders silently return the previous day's file on holidays). **S1 instrument history:** NIFTYBEES daily OHLCV back to listing, from Kite historical day candles. Legacy (pre-8 Jul 2024) bhavcopies are parsed for the S1 ISINs only, as the D3 secondary source. The full-market 1995+ legacy backfill is S2, and only if OD-6 = stock-picking. | S1 / S2 |
-| D2 | **Exchange calendar:** trading holidays, special sessions (Muhurat, Budget-day Saturday), session windows (pre-open, normal market, closing auction; exact times §16.2 #13), and the **settlement date of each trade (T+1)**. K4, A6 and X1 use it. **T+1** and **next session** always mean the next trading session in this calendar, never the next calendar day. Special sessions (Muhurat, Budget-day Saturday) count as sessions for signals and moving averages, because their closes are published, but are never order windows: the platform places no orders in them, the evening pipeline of a special session emits no intent, and the special session's close enters the moving average at the next regular session's pipeline. | S1 |
+| D2 | **Exchange calendar:** trading holidays, special sessions (Muhurat, Budget-day Saturday), session windows (pre-open, normal market, closing auction; exact times §16.2 #13), and the **settlement date of each trade (T+1)**. K4, A6 and X1 use it. **T+1** and **next session** always mean the next trading session in this calendar, never the next calendar day. Special sessions (Muhurat, Budget-day Saturday) count as sessions for signals and moving averages, because their closes are published, but are never order windows: the platform places no orders in them, the evening pipeline of a special session emits no intent, and the special session's close enters the moving average at the next regular session's pipeline. Backtests apply the same rule. | S1 |
 | D3 | **Data-quality checks:** missing sessions, duplicates, stale sources, OHLC sanity. For S1 instruments, cross-check Kite day candles against the bhavcopy. If the close differs by more than 0.1% or volume by more than 5%, alert and compute no signal for that session. The Nifty 50 price-index close for session T, which is the only signal input, MUST also come from two sources and agree within 0.05%: the niftyindices.com daily report and the Kite day candle for the index instrument (`NSE:NIFTY 50`, §16.2 #20). If they disagree, or either is missing by the §9 cutoff, no signal is computed for T. | S1 |
 | D4 | **Minute bars:** a one-off 30-minute check in S1 of Kite's total look-back for minute candles. If it is under 2 years, an incremental archive job starts in S1 as a side job. Otherwise minute bars are fetched on demand in S5. | S1 (check, archive if needed) / S5 |
 | D5 | **News/announcements raw archiver.** A side job, timeboxed to 4 h, that never blocks trading and is not an exit criterion. One cron script appends the NSE corporate-announcements RSS plus the ET Markets, Business Standard and Mint markets RSS as raw items with a first-seen timestamp, deduped by GUID. Alert if a feed hasn't changed for 48 h (Moneycontrol feeds return HTTP 200 but have been frozen since Apr 2024). Start immediately: there is no free historical Indian news archive. | S1 (side) |
@@ -170,7 +170,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **Premium check (risk-increasing orders):** if abs(LTP / iNAV − 1) exceeds `inav_band_bps`, skip the order, journal it and alert (K4(d)). | |
 | | **Exit pricing (risk-reducing orders):** use the sell formula above. Switch to the best bid, clamped to the exchange price band, only when (d) would block the order or the order is a K1 flatten or `/flatten`. Raise one alert per order, not one per reprice. | |
 | | **Repricing:** every 60 s, up to 10 modifications per order. When a **risk-increasing** order hits the cap, it stops being modified and rests at its last limit until `order_expiry`. When a **risk-reducing** order hits the cap, it is cancelled and re-placed as a new order with a new E5 tag, again with at most 10 modifications. The E1 rate limits and the broker's 25-modification cap are never exceeded. | |
-| | **Broker-side expiry (MUST):** every risk-increasing and drill order is placed with Kite `validity=TTL` and `validity_ttl` = whole minutes left until its `order_expiry` (rounded down, minimum 1), re-set on every modification. The broker then expires the order even if the platform is dead, logged out or E8-halted. Verified in A6 (§16.2 #18). If TTL is not accepted, the fallback is that a risk-increasing order never rests: any unfilled remainder is cancelled after each 60 s reprice attempt.
+| | **Broker-side expiry (MUST):** every risk-increasing and drill order is placed with Kite `validity=TTL` and `validity_ttl` = whole minutes left until its `order_expiry` (rounded down, minimum 1), re-set on every modification. The broker then expires the order even if the platform is dead, logged out or E8-halted. Verified in A6 (§16.2 #18). If TTL is not accepted, the fallback is that a risk-increasing order never rests: any unfilled remainder is cancelled after each 60 s reprice attempt. | |
 | | **Expiry:** at `order_expiry` the unfilled remainder of a risk-increasing order is cancelled and the order ends EXPIRED. Risk-reducing remainders are re-issued under A5. | |
 | | **Flatten expiry:** for K1 flattens, `/flatten` and K7 flattens, `order_expiry` is the end of the normal market session on the day of issue, never the bot order window. Until then any unfilled remainder keeps repricing and re-placing under R8a. Anything still unfilled is re-issued at the start of the next normal session. Strategy exits keep `order_expiry` at the end of the bot order window and are re-issued in the next session's window. | |
 | | The limit shown at approval is indicative; placement may differ within the K4 bands. | |
@@ -229,10 +229,10 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **ACTIVE:** normal operation. | |
 | | **REDUCING:** exits only, no new risk. | |
 | | **Cancel on entry:** when the portfolio (or, from S2, the bot) enters REDUCING or HALTED from any cause, or `UNPROTECTED`/`NOT_FLATTENABLE` becomes set, the gateway immediately cancels every open risk_increasing order, after an E5 order-book check. The unfilled remainder ends DROPPED_STATE and is journaled and alerted. | |
-| | **HALTED:** no new orders, and all open bot orders are cancelled. HALTED set by E4 or `/halt` pauses all orders, including strategy exits, and alerts every 30 min until the owner decides via the CLI. Exceptions: | |
+| | **HALTED:** no new orders, and all open bot orders are cancelled. HALTED set by a **pausing cause** (E4, `/halt`, E9 `backstop_fired`, E1 `storage`) pauses all orders, including strategy exits, and alerts every 30 min until the owner decides via the CLI. Exceptions: | |
 | | (i) `/flatten` is accepted in every state, including HALTED. | |
 | | (ii) Flattens issued by K1 (reference or epoch threshold), `/flatten` or K7 continue under A5 until filled. | |
-| | (iii) If a K1 threshold is breached while already HALTED by E4 or `/halt`, the K1 flatten is still issued. | |
+| | (iii) If a K1 threshold is breached while already HALTED by a pausing cause, the K1 flatten is still issued. | |
 | | (iv) Under an **E8** halt no API orders are sent at all. Alerts go out every 5 min with the manual Kite-app runbook (§13.6: cancel open tradebot orders, delete the GTT, then flatten). Each alert lists every open tradebot-tagged order (id, side, qty) and every live GTT id and qty from the last successful E4(0) sync. | |
 | | (v) **Flatten sizing:** every flatten (K1 reference or epoch, `/flatten`, K7) sizes each ISIN at min(ledger qty, broker (settled + T1) qty − `external_holdings` qty) − the quantity in open sell orders, including any E9 GTT-triggered order (which the flatten adopts per K5(vi)). It is recomputed after the E4(0) sync before every placement and re-placement. The E9 GTT is reduced or deleted first, per E9 Coordination. A flatten therefore never sells the owner's external units. | |
 | | (vi) **E9 is exempt from states:** the E9 GTT and any order it has triggered are never cancelled by a state change. E9 place, modify and re-arm are not "new orders" for K4(k) or K5. They continue in every state and flag, and stop only under an E8 halt or with no valid session. The only reductions or deletions are the ones E9 Coordination makes just before a platform sell is placed, and the deletion when the sub-ledger is flat. **Adoption:** with a valid session and no E8 halt, an open, not-fully-filled GTT-triggered order is adopted at the next E4(0) sync as a risk-reducing platform order. It is repriced under R8a exit pricing (best bid clamped to the exchange band when a K1, `/flatten` or K7 flatten is pending), its modifications count against the per-order cap, and at the cap it is cancelled and re-placed with a new E5 tag, sized per K5(v). State changes still never cancel it. | |
@@ -258,7 +258,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | E1 | **One order path.** | S1 → S2 |
 | | **Gateway service:** in S1, one long-running service runs the in-session scheduler, the Telegram poller and the gateway module. Only it can call a broker order API. It owns the broker session, **one API key per broker account**, the rate limiter, the K4 checks and the audit log. | |
 | | **Rate limits:** at most **5 orders/s**, plus the broker's per-minute and per-day caps (Kite: 10/s, 400/min, 5,000/day). | |
-| | **Writers:** it is the only writer of `live.sqlite` (orders, fills, ledger, tax lots, journal, gate records). **Fail closed:** if the audit log or `live.sqlite` cannot be written, no order is sent or modified, and the gateway sets HALTED with cause `storage`, alerting every 5 min. | |
+| | **Writers:** it is the only writer of `live.sqlite` (orders, fills, ledger, tax lots, journal, gate records). **Fail closed:** if the audit log or `live.sqlite` cannot be written, no order is sent or modified; cancels are still attempted and recorded in a plain append-only fallback file for later reconciliation, open risk-increasing orders expire by TTL, and the gateway sets HALTED with cause `storage`, alerting every 5 min. | |
 | | **Batch jobs:** ingest, the D5 archiver, backtests and reports run as systemd timers or CLI jobs. They write Parquet or `research.sqlite` (trial registry, backtest results) and never call broker order APIs. | |
 | | **Commands:** the CLI and Telegram send commands to the service. | |
 | | **S2:** the gateway moves into its own process once B3 adds bot processes. | |
@@ -291,8 +291,8 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **Trigger:** min(the price at which portfolio epoch drawdown would reach `governor.backstop_dd` (from S2: computed per ISIN with every other position held at its LTP), LTP × (1 − `risk.gtt_min_gap_pct`/100)). `backstop_dd` defaults to −13.5%, beyond the −12% platform halt, so the two don't race. `gtt_min_gap_pct` defaults to 1; confirm Kite's minimum trigger-to-LTP gap in A6. The min() always applies, including when the backstop level has already been passed or a K1, `/flatten` or K7 flatten is pending. In that case the GTT is what carries out the pending flatten without a session. | |
 | | **Limit:** trigger × (1 − `risk.gtt_limit_offset_pct`/100) (default 3), clamped to the exchange band. | |
 | | **Maintenance:** placed or modified through the gateway (E1/E8, audit-logged) after every fill, at the first E4(0) sync that shows previously uncovered units as settled (which clears `NO_BACKSTOP`), and **in the evening pipeline while the token is still valid** (§13.3 step 6), for the covered qty. Arming MUST NOT depend on the next morning's `/login`; step 7 only verifies and re-arms. Before the ex-date of a D6 corporate action on a held ISIN, the GTT is deleted and re-armed with the adjusted quantity and trigger in the evening pipeline, because Kite's handling of GTTs across corporate actions is unverified (§16.2 #22). Deleted when the sub-ledger is flat. If Kite rejects a GTT on T1 units (§16.2 #17), set `NO_BACKSTOP` that evening and alert: "no backstop tomorrow unless you log in". | |
-| | **Booking:** E4(0) books fills from GTT-triggered orders as tagged bot fills, matched by GTT id, not as `operator`. A GTT fill means the backstop acted before the platform did, which is anomalous whenever the platform was alive: the fill sets HALTED with cause `backstop_fired` (K5), cleared CLI-only, so no re-entry intent is emitted automatically. When the fill also takes epoch drawdown to the breach level, the epoch breach applies as well. | |
-| | **Known limits:** GTT triggers on LTP and isn't guaranteed at the exchange. A limit sell may not fill on a gap below the limit. GTTs expire after 1 year, so re-arm yearly. T1 units settling after the next session's open aren't covered until they settle, and if Kite rejects a GTT on T1 units (§16.2 #17) no T1 units are covered before settlement (`NO_BACKSTOP`). It needs DDPI (C9). Whether GTT API calls need the whitelisted IP is §16.2 #2, verified in A6. If the host dies between reducing the GTT and the platform sell filling, the remainder is uncovered until the host returns or the owner acts: the M3 dead-man alert and the §13.6 runbook cover this. | |
+| | **Booking:** E4(0) books fills from GTT-triggered orders as tagged bot fills, matched by GTT id, not as `operator`. Any GTT fill sets HALTED with cause `backstop_fired` (K5) when it is booked, whether the platform was dead or alive (alive is the anomalous case: the backstop acted before the platform did), cleared CLI-only, so no re-entry intent is emitted automatically. When the fill also takes epoch drawdown to the breach level, the epoch breach applies as well. | |
+| | **Known limits:** GTT triggers on LTP and isn't guaranteed at the exchange. A limit sell may not fill on a gap below the limit. GTTs expire after 1 year, so re-arm yearly. T1 units settling after the next session aren't covered until they settle, and if Kite rejects a GTT on T1 units (§16.2 #17) no T1 units are covered before settlement (`NO_BACKSTOP`). It needs DDPI (C9). Whether GTT API calls need the whitelisted IP is §16.2 #2, verified in A6. If the host dies between reducing the GTT and the platform sell filling, the remainder is uncovered until the host returns or the owner acts: the M3 dead-man alert and the §13.6 runbook cover this. | |
 | | **Manual path:** a documented manual flatten path from the phone (§13.6). | |
 
 ### 8.6 Autonomy stages (A)
@@ -313,7 +313,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | A4 | **Operator overrides** are journaled with mistake class `operator`: manual trades in bot instruments, rejected approvals, config edits submitted during market hours, and `external_holdings.yaml` changes. | S1 |
 | A5 | **Exit policy, every live stage.** | S1 |
 | | **What goes out without approval:** strategy exits, the K1 flattens (reference or epoch threshold), `/flatten` and the K7 demotion flatten, as API orders under K4(j). They are algo orders, so E8 and C9 are prerequisites of the first live order. | |
-| | **Never dropped:** a failed or expired exit is re-issued every session, with a repeat alert every 30 min, until it fills or is cancelled from the CLI. While the portfolio is HALTED by E4 or `/halt`, strategy exits are held (K5) and resume at the next placement opportunity after the CLI clears that halt; flattens continue regardless. | |
+| | **Never dropped:** a failed or expired exit is re-issued every session, with a repeat alert every 30 min, until it fills or is cancelled from the CLI. While the portfolio is HALTED by a pausing cause (K5), strategy exits are held and resume at the next placement opportunity after the CLI clears that halt; flattens continue regardless. | |
 | A6 | **Drills and smoke test.** The CLI `drill` command creates intents for a pseudo-bot `drill`: 1 unit of the S1 risk ISIN, its own sub-ledger (counted in E4 sums), and its own order caps. They pass through the gateway and K4 without approval, are journaled as `drill`, and MUST end flat. | S1 |
 | | **Paper drills** trigger checklist events that a low-frequency bot may not produce naturally (§10). | |
 | | **Live smoke test,** run after C9 and E8: | |
@@ -536,7 +536,7 @@ tradebot/
   journal/     decision journal (L1), mistake classes (L2), trial registry (R5), gate records (A1)
   reports/     daily summary (M2), after-tax vs RM/BH (R7)
   ops/         health + heartbeat (M3), backup (C7)
-  cli/         the only path for un-halting, config changes, promotions, drills, external holdings
+  cli/         the only path for un-halting, config changes, promotions, drills, external holdings, cash movements (K0), new-epoch
 config/        portfolio.yaml, bots/*.yaml, costs/*.yaml (dated), tax_profile.yaml, external_holdings.yaml
 ```
 
@@ -569,7 +569,7 @@ RISK_CHECKED -> PLACED -> (PARTIAL ->)* FILLED | CANCELLED | BROKER_REJECTED | E
 ```
 
 - Every transition is written to the audit log with a timestamp and a hash-chain link. Retries follow E5.
-- **Restart:** on startup the gateway rebuilds every in-flight order from the broker order book by tag (E5) before it resumes R8a repricing or places anything. An approved intent whose order is not at the broker is placed only if its `order_expiry` has not passed. Approvals survive restarts because they live in `live.sqlite`.
+- **Restart:** on startup the gateway rebuilds every in-flight order from the broker order book by tag (E5) before it resumes R8a repricing or places anything. An approved intent whose order is not at the broker is placed, as a fresh R8a placement with K4 re-run, only if its `order_expiry` has not passed. Approvals survive restarts because they live in `live.sqlite`.
 - **DROPPED_NO_TOKEN** is the terminal state when the broker session is invalid at placement, whatever the flags say; **DROPPED_STATE** covers every other K4(k) failure.
 - A **risk_reducing** intent that ends in any non-FILLED terminal state triggers an A5 re-issue at the next placement opportunity.
 - A **risk_increasing** intent that ends that way is journaled and alerted.
@@ -663,8 +663,8 @@ research:
   - no order is placed, modified or re-placed unless an E4(0) sync succeeded within the last 2 minutes;
   - risk-increasing orders are placed only in ACTIVE with no blocking flag;
   - a flatten is never blocked except under E8 or when there's no valid session;
-  - outside E8 and no-session periods: for every live (non-drill) ISIN, armed GTT qty + open platform sell qty ≥ covered qty (E9). `NO_BACKSTOP` may stand in only after the broker has rejected the GTT, never because of a HALTED or REDUCING cause;
-  - at every evening logout, an armed GTT covers every bot unit that will be settled at the next open, unless the broker rejected it and `NO_BACKSTOP` is set;
+  - outside E8 and no-session periods: for every live (non-drill) ISIN, armed GTT qty + open platform sell qty ≥ covered qty (E9), except during an R8a cancel-and-re-place gap of at most one reprice interval. `NO_BACKSTOP` may stand in only after the broker has rejected the GTT, never because of a HALTED or REDUCING cause;
+  - at every evening logout, an armed GTT covers the covered qty (E9), unless the broker rejected it and `NO_BACKSTOP` is set;
   - a platform sell is never sent while the untriggered GTT qty + that sell's qty exceeds the covered qty;
   - total open sell quantity per ISIN (platform plus GTT-triggered) never exceeds the K5(v) bound, so there's no double sell;
   - flatten qty ≤ the K5(v) bound, and external units are never sold;
@@ -747,7 +747,7 @@ The full multi-bot platform with the learning loop takes about **9–12 months p
 | OD-9 | News data: free only, or add EODHD after a free-tier test? | Free only |
 | OD-10 | Live options threshold | ₹10L+ plus the §10 gates |
 | OD-11 | Crypto in year 2? | Decide at S6 |
-| OD-12 | Cash leg for bot #1 | **Cash (0%).** Conservative and creates no slab-rate tax items. LIQUIDBEES and liquid/overnight funds are later challengers (L4), priced after tax at the owner's marginal slab rate. They are taxed at slab rate (unverified standard rule; confirm with the CA). |
+| OD-12 | Cash leg for bot #1 | **Cash (0%).** Conservative and creates no slab-rate tax items. LIQUIDBEES and liquid/overnight funds are later challengers (L4), priced after tax at the owner's marginal slab rate. They are taxed at slab rate (unverified standard rule; confirm with the CA). Note (v1.10): RM's cash half earns the liquid-fund return while the bot's cash earns 0%, so the bot is handicapped against its own benchmark for every session it spends in cash, and the Backtest → Paper gate is stricter than the signal alone implies. Revisit at the first gate run. |
 | OD-13 | Dhan data API price; Lightsail Mumbai price | Treat as unknown until quoted |
 | OD-14 | What to do if bot #1 fails Backtest → Paper | Decide when it happens. Options: a hysteresis or volatility-target challenger, bot #3 (low-vol ETF) as the first live bot, or staying on paper. |
 | OD-15 | S1 scope against hours (§14): accept the S1a/S1b split and a first live order in Mar–Apr 2027, or cut S1a scope to hold Feb–Mar 2027? Deferral candidates, in order of least damage: L4 to S2; the C7 hash chain to S1b; the D10 pre-2013 liquid-fund proxy to S1b (start RM in 2013 and report the 2007–12 span against BH only); X1 FIFO lots and R7 after-tax reporting to S1b, running the first Backtest → Paper gate pre-tax and re-running it after tax before Paper → Approve. | Accept the split and Mar–Apr 2027 |
@@ -1012,3 +1012,39 @@ These are unverified secondary-source figures and researcher backtests. Treat th
 | MinTRL | Minimum track record length |
 | Champion / challenger | The live strategy or model vs a candidate replacement |
 | RM / BH / PF | Benchmarks defined in §4.1 |
+
+---
+
+# Appendix B: Change log
+
+### v1.10 (2026-09-30): hardening passes on v1.9
+
+Five review passes (internal consistency, specification gaps, failure scenarios, testability, plan realism) and a coherence re-read. No open decision was decided: every new default is marked and listed under "Decisions needed" below. Verification of §16.2 against primary sources was attempted and blocked by network policy, so §16.2 keeps its status and gains items 19–22.
+
+**Consistency**
+- §7 principle 8, A5, K5: only flattens never wait for a human. Strategy exits pause under a pausing-cause HALTED (E4, `/halt`, E9 `backstop_fired`, E1 `storage`).
+- B5: disjointness is checked at promotion and applies to live bots only, so an L4 challenger can paper-trade the champion's ISIN.
+- K1: "reached" is defined; with default thresholds the epoch breach dominates the reference-peak halt; any governor HALTED demotes to PAPER through K7(4); a backtest is one epoch, and its resumption rule is a modelling assumption about the owner.
+- K7: the Paper → Approve clock restarts at a demotion. A6: the `/flatten` drill sets HALTED; a `/halt` drill is added; the Approve → Auto gate accepts the smoke-test drill records.
+
+**Gaps**
+- K0: cash movements through `cash-move`; unit accounting; reference peak; bot drawdown; `new-epoch` and withdrawal preconditions.
+- D1: UDiFF backfill from 8 Jul 2024 and missed-session backfill. D2: T+1 and next session are calendar sessions; special sessions count for signals, never for orders. D3/D10: the Nifty 50 price-index close has a two-source check.
+- E5: tag format within Kite's 20-character limit; terminal replies; GTT identified by id. B1: bot `code`. §13.4: restart semantics; DROPPED_NO_TOKEN against DROPPED_STATE. R10: trial count defined. K1: `halve_release`. §13.5: Telegram identity config; example external-holdings, tax-profile and dated cost files. A2(d): rejected or expired entries. §9/M3: IST schedules, UTC storage, NTP. K4(b): broker cash cap. E9: per-ISIN trigger from S2.
+
+**Failure scenarios**
+- E9: covered quantity corrected for T+1 settlement timing; cancel-and-re-place is atomic for the GTT; re-arm on settlement and before corporate actions; `backstop_fired` cause; the dead-host limit and its runbook.
+- E1 `storage` fail-closed; E6 session lost during market hours; E4 sync failure; K1 stale marks; §11.1 annual re-selection is procedure, not a challenger; §13.7 new invariants and failure injections.
+
+**Testability**
+- K1 non-disableable stated in checkable terms; T3, §10.1 and K7 share one Sharpe computation; every §10.2 criterion names its window, comparison and evidence; A1 gate records are one row per criterion; P4 counting rule; M1(f) limit; strategy purity test.
+
+**Plan**
+- §14: S1 split into S1a (paper-ready, 110–160 h) and S1b (live-ready, 60–85 h, built during the paper period); first approved live order Mar–Apr 2027; S2, S3, S5 and S6 shifted to follow; OD-15 records the decision and ranks scope-deferral candidates.
+
+**Decisions needed from the owner** (defaults stand until changed)
+1. OD-15: accept the S1a/S1b split and the Mar–Apr 2027 date, or cut S1a scope to hold Feb–Mar 2027.
+2. OD-5: keep `halve_release` = −3 for the governor's halving.
+3. E9 `backstop_fired`: a GTT fill halts live trading until a CLI review (default: yes).
+4. OD-12: the 0% cash leg handicaps the bot against RM's liquid leg; decide whether that stands at the first gate run.
+5. §16.2 #3 (DDPI covering API sells and GTT on holdings) is the one item that can invalidate the unattended-exit design; it can be asked of Zerodha before any code exists. Items 19–22 join the A6 verification list.
