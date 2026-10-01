@@ -367,7 +367,8 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **(d) 2-step:** the owner's Telegram account MUST have 2-step verification. | |
 | | **(e) CLI-only:** leaving REDUCING or HALTED, raising limits, promotions and config changes can only be done from the CLI over SSH. | |
 | | **(f) Rate:** stay under 1 message per second per chat. | |
-| M2 | **Reports.** Daily Telegram summary: positions, P&L after costs, drawdown, state and flags, and tomorrow's pending intents. The monthly report arrives in S2: per bot and portfolio, after costs and after tax, against RM/BH/PF, with tracking against the expectation model. | S1 → S2 |
+| | **(g) Formats:** the command grammar, the approval card, the acknowledgements, the daily summary and every alert are rendered by pure functions from the fixtures in **Appendix E**; parse mode HTML; a message longer than 4,096 characters is split at line boundaries with a part suffix; identical alerts (same level and cause) are coalesced within their repeat cadence. | |
+| M2 | **Reports.** Daily Telegram summary (fixture in Appendix E.4): positions, P&L after costs, drawdown, state and flags, data status, backstop status, and tomorrow's pending intents. The monthly report arrives in S2: per bot and portfolio, after costs and after tax, against RM/BH/PF, with tracking against the expectation model. | S1 → S2 |
 | M3 | **Health checks:** token validity, data freshness, missed scheduled jobs, egress IP, clock synchronisation (NTP offset 1 s or less). An **external dead-man heartbeat** (e.g., healthchecks.io free tier) alerts by Telegram or email if the daily pipeline or the poller stops checking in. Disk and error-rate checks come in S2. | S1 → S2 |
 | M4 | Web dashboard. | Parked (trigger: owner request only) |
 
@@ -664,7 +665,8 @@ research:
   - governor: backtest re-entry, a second −12% leg after a reference-peak reset triggering the epoch breach, and the −6% halving applied to the target;
   - K4 checks: the (j) exemptions including intraday flatten outside the order window, and (k);
   - R8a pricing procedure: one-sided book, empty feasible interval, iNAV fallback to the LTP band, tick rounding direction per side, zero quantity, modification accounting;
-  - FIFO lots including external lots; calendar and settlement dates; NAV/units.
+  - FIFO lots including external lots; calendar and settlement dates; NAV/units;
+  - Telegram rendering against the Appendix E fixtures, callback payload size at maximum id and nonce length, the M1(a) identity check, nonce single use, message splitting and alert coalescing.
 - **State-machine invariants** (MUST). K5/K7/A5/K1/E9 are implemented as one explicit transition table, **Appendix C**, which is the source of truth where the prose and the table disagree. Property-based tests over random event sequences (breaches, E4 mismatches, E8, `/halt`, `/flatten`, demotions, fills, restarts, GTT fills, storage failures) assert the properties in C.9, which include:
   - a cause never lowers the state set by another;
   - no order is placed, modified or re-placed unless an E4(0) sync succeeded within the last 2 minutes;
@@ -1269,3 +1271,86 @@ For this window the bot's after-tax return (5.31%) is strictly greater than RM's
 - The terminal liquidation is priced like a strategy exit (close less slippage, full sell charges including the DP charge).
 - Benchmarks pay no transaction costs, are liquidated once, and are taxed by leg; the liquid leg's slab-rate tax is the larger part of RM's tax bill.
 - After-tax values subtract tax from the pre-tax terminal value without compounding; the governor's NAV is unaffected.
+
+---
+
+# Appendix E: Telegram fixtures (normative for M1 and M2)
+
+Messages are rendered by pure functions (template + a dict of values → text) and compared with these fixtures in tests. Values in the examples are illustrative. Parse mode is HTML; the renderer escapes `<`, `>` and `&` in every value. Every message starts with a bracketed tag so the owner can filter by eye.
+
+### E.1 Command grammar
+
+| Command | Who | Effect | Reply |
+|---|---|---|---|
+| `/status` | owner | none | the E.4 summary block rendered from live state, headed `[STATUS]` |
+| `/halt` | owner | sets CMD_HALT (C.2) | `[HALTED] /halt at 10:04 IST. Cancelled: 1 risk-increasing order (tbet00001a). Strategy exits held. Clear from the CLI: clear-cause CMD_HALT.` |
+| `/flatten` | owner | first tap: a confirmation card with one button, nonce valid 30 s; second tap: sets CMD_FLATTEN and issues the flattens | first: `[CONFIRM] Flatten every bot position and set HALTED? Tap within 30 s.` with button `Confirm flatten`; second: `[FLATTEN] Confirmed at 10:05 IST. Flatten issued: SELL 1051 NIFTYBEES. GTT reduced first. Progress follows.`; late: `[EXPIRED] Flatten confirmation expired.` |
+| `/login <request_token>` | owner | E6 token exchange, then E4, then the E9 check | `[LOGIN] Session valid. E4: clean. GTT armed: 1051 @ trigger 165.30. UNPROTECTED cleared.` or `[LOGIN FAILED] <broker reason>. Try again or log in from the app.` |
+| `/help` | owner | none | the command list |
+| anything else | owner | none | `[?] Unknown command. /help` |
+| any update from another `from.id` or `chat.id` | non-owner | ignored silently; counted | none; one `[WARN] n messages from unknown senders today` alert per day when n > 0 |
+
+### E.2 Approval card (A2(a))
+
+```
+[APPROVAL] etf-trend-v1 · BUY 1055 × NIFTYBEES (INE…)
+Indicative limit ₹190.10 · notional ₹2,00,555 · capped by cash to 1051 if needed
+Reason: Nifty 50 close 23,150.20 > SMA100 22,980.55 · regime ON since 2023-01-20
+Risk: ACTIVE · flags none · DD ref −1.2% · epoch −1.2% · halved no
+Approve by 09:15 IST Mon 23 Jan · placed 09:20–10:30 after drift check and K4
+intent 1f3k · config 9a7c3e · git 4e2d81
+```
+Inline keyboard: `[ Approve ✅ ]  [ Reject ❌ ]`.
+
+**Callback payload (M1(b)):** `<a|r>:<intent id, base-36, at most 8 chars>:<nonce, 22 chars base64url>`, at most 34 bytes, within Telegram's 64-byte limit. The nonce is single-use and bound to the intent; it is rejected after `approval_expiry` or on reuse.
+
+### E.3 Acknowledgements
+
+| Event | Text |
+|---|---|
+| Approve accepted | `[OK] Approved 1f3k at 20:41 IST. Placement 09:20–10:30 Mon 23 Jan; drift check and K4 re-run at placement.` |
+| Reject accepted | `[OK] Rejected 1f3k. Journaled as operator. Re-emitted tomorrow evening only if the regime holds.` |
+| Late tap or reused nonce | `[IGNORED] 1f3k: approval expired at 09:15 / nonce already used.` |
+| Expiry at `approval_expiry` | `[EXPIRED] 1f3k not approved by 09:15. No entry today.` |
+| Placement outcome | `[PLACED] 1f3k: BUY 1051 @ ₹190.10, TTL to 10:30.` then `[FILLED] 1f3k: 1051 @ ₹190.10 (slippage +0.8 bps).` or `[EXPIRED] 1f3k: 400 unfilled at 10:30, cancelled.` or `[DROPPED] 1f3k: drift 2.4% > 2% / state REDUCING / no token.` |
+
+### E.4 Daily summary (M2)
+
+```
+[SUMMARY] Fri 20 Jan 2023 (T) · etf-trend-v1 · APPROVE
+State ACTIVE · causes none · flags none · session valid · last sync 15:46
+NAV 100.00 (2,000.00 units) · capital ₹2,00,000 · DD ref 0.0% · epoch 0.0% · halved no
+Position: none · cash ₹2,00,000
+P&L after costs: today ₹0 · epoch ₹0
+Signal: Nifty 50 close 23,150.20 vs SMA100 22,980.55 → ON
+Data: bhavcopy ✓ · Kite candle ✓ · index two-source ✓ · corporate actions ✓ · TRI/NAV pending (never blocks)
+Pending for T+1: BUY 1055 NIFTYBEES (intent 1f3k) · awaiting approval, expires 09:15
+Backstop: no GTT (flat) · covered qty 0
+Next: /login before 08:45 Mon 23 Jan
+```
+
+When a position is held, the position line reads `Position: 1051 NIFTYBEES @ LTP ₹190.40 = ₹2,00,110 (settled 1051, T1 0)` and the backstop line `Backstop: GTT 1051 @ trigger ₹165.30 limit ₹160.34 · covered qty 1051`.
+
+### E.5 Alerts
+
+Format: `[LEVEL] <cause or check> · what happened · what to do · repeats every <cadence>`. LEVEL is HALT, WARN or INFO. Cadences come from the requirement that raises the alert (K5, E6, E8, E9, M3).
+
+| Alert | Fixture | Cadence |
+|---|---|---|
+| E4 mismatch | `[HALT] E4 · broker 1051 vs ledger 1000 NIFTYBEES for 2 checks · HALTED, open bot orders cancelled, strategy exits held · fix the ledger, then reconcile-ledger from the CLI · repeats every 30 min` | 30 min |
+| E8 egress | `[HALT] E8 · egress IP 13.x.x.x is not the registered 65.x.x.x · no API orders possible · in the Kite app: cancel tbet00001a (BUY 1051), delete GTT 3391 (SELL 1051 @ 165.30), then flatten by hand · repeats every 5 min` | 5 min |
+| UNPROTECTED | `[WARN] UNPROTECTED · no valid session at 09:05 · entries blocked; exits wait; GTT 1051 armed · send /login <request_token>` | at 09:05, then every 30 min while a position is held |
+| NO_BACKSTOP | `[WARN] NO_BACKSTOP · GTT rejected on T1 units (reason) · 1051 units uncovered tonight · log in tomorrow before 09:05 or flatten by hand · repeats every 30 min` | 30 min |
+| backstop_fired | `[HALT] E9 · GTT 3391 filled 1051 @ ₹165.20 · HALTED until clear-cause E9_BACKSTOP from the CLI · no re-entry will be proposed` | once |
+| storage | `[HALT] E1 · live.sqlite not writable · HALTED, cancels and flattens via fallback log · fix storage, then clear-cause E1_STORAGE · repeats every 5 min` | 5 min |
+| Data | `[WARN] D3 · index close 23,150.20 (niftyindices) vs 23,139.90 (Kite) differ by 0.045%... no signal for T` (threshold 0.05%) | once per session |
+| Dead man (external) | sent by the heartbeat service, not the platform: subject `tradebot: no check-in for 30 min` | per the service |
+
+### E.6 Tests
+
+- Each fixture above is produced byte-for-byte from a fixed input dict.
+- Callback payloads at the maximum id and nonce length are at most 64 bytes.
+- Updates with a wrong `from.id` or `chat.id` produce no reply and increment the unknown-sender counter.
+- A nonce is accepted at most once and never after `approval_expiry`.
+- The sender never exceeds 1 message per second; messages over 4,096 characters are split at line boundaries with `(1/2)`, `(2/2)` suffixes.
+- Two alerts with the same level and cause inside one cadence collapse to one; a changed payload (a new order id in the E8 list) is sent at once.
