@@ -1,6 +1,6 @@
 # PRD hardening log
 
-Target: `docs/PRD.md`, Tradebot PRD. Baseline v1.9 (commit `712d156`) → v1.10.
+Target: `docs/PRD.md`, Tradebot PRD. Baseline v1.9 (commit `712d156`) → v1.10 (iteration 1) → v1.11 (iteration 2).
 Method: repeated review passes, each with one lens, each applied and committed separately so every change is a reviewable diff. Open owner decisions were never decided; where a pass needed a default it added one, marked it, and listed it in Appendix B of the PRD.
 
 | Pass | Lens | Commit | Edits |
@@ -78,3 +78,50 @@ A further pass on the same lenses found nothing material, so the loop stops here
 4. R8a pricing when the order book is one-sided (no best ask or bid) or the quote is inside the iNAV band but outside the exchange band.
 5. Telegram message formats (approval card, daily summary, alerts) as fixtures, so M1 and M2 are testable.
 6. Primary-source verification of §16.2 from a network that can reach Zerodha and NSE.
+
+---
+
+# Iteration 2 (2026-10-01): v1.10 → v1.11
+
+Lenses were the six listed at the end of iteration 1. One commit per pass; verification re-attempted and still blocked.
+
+| Pass | Lens | Commit |
+|---|---|---|
+| 8 | Formal state machine (Appendix C) | `34074f2` |
+| 9 | After-tax evaluation procedure and worked example (Appendix D) | `f59299c` |
+| 10 | §11.1 selection tie-breaks | `109555a` |
+| 11 | R8a pricing edge cases | `e315d5b` |
+| 12 | Telegram fixtures (Appendix E) | `ce31a89` |
+| 13 | Verification re-attempt, coherence, v1.11 | this commit |
+
+## Pass 8: state machine
+
+Derived every state, cause, flag, event and transition from the K1, K5, K7, A5 and E9 prose. Writing the gating matrix exposed two real conflicts: the `storage` cause blocked all orders including flattens, which contradicted the never-blocked invariant, and the evening Decide step emitted risk-increasing intents that K4(k) would drop every day while REDUCING stood. Both fixed in the body. The appendix is declared normative so the property tests have one source of truth.
+
+## Pass 9: after-tax evaluation
+
+Writing the procedure forced three decisions the prose had left open: whether chained OOS windows restart flat (no: one continuous simulation with parameter switches, which is what the live bot does), whether benchmarks are liquidated per window or once per span (once, so the benchmark gets LTCG over the chain and the bar is honest), and whether tax compounds (no: deducted at the end, NAV stays pre-tax so the governor never sees a tax step). The worked example was computed by a script, not by hand, and exposed that the §11.1 quantity rule could overdraw cash by the charges; sizing now includes an affordability cap. Items 6–8 in Appendix B record what the owner should confirm.
+
+## Pass 10: selection tie-breaks
+
+Deterministic ordering, two-decimal comparison, zero-trade points and the fallback flag. No conflicts found.
+
+## Pass 11: R8a pricing
+
+Rewrote the three pricing rows as an eight-step procedure. The original "switch to the best bid when (d) would block" rule for exits was ambiguous because exits are exempt from (d); it now reads as "when the ETF trades outside the band or there is no bid". Buy limits round down, sell limits round up, so rounding never crosses more than intended; A6 drill orders keep their explicit limits.
+
+## Pass 12: Telegram fixtures
+
+Fixtures for every message the platform sends, with the callback payload bounded at 34 bytes. One fixture was wrong on first draft (a data alert below the D3 threshold) and was caught in the coherence pass.
+
+## Pass 13: coherence and verification
+
+kite.trade, support.zerodha.com, nseindia.com and cleartax.in are still unreachable from this container, so §16.2 is unchanged in status and gained #23. Coherence fixes: C9 re-run cadence, A1 promotion preconditions, E6 alert cadence, the CLI command list, §0 note that Appendices C–E are normative.
+
+## Next lenses, if a third iteration is wanted
+
+1. A data-contract appendix: Parquet schemas for bhavcopy, candles, index series, corporate actions and the point-in-time view object, with the D3 checks as column constraints.
+2. `live.sqlite` and `research.sqlite` schemas: orders, fills, lots, journal, gate records, trials, with the hash-chain fields.
+3. A runbook appendix with every CLI command, its preconditions and its journal entry, generated from Appendix C.
+4. Capacity and cost sanity: NIFTYBEES traded value against the ₹2L, ₹10L and ₹25L ramp before R9 is built.
+5. Primary-source verification of §16.2 from a network that can reach Zerodha and NSE.

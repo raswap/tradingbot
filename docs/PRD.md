@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | v1.10 (hardened from v1.9; changes and decisions needed in Appendix B) |
+| Version | v1.11 (hardened from v1.9 in two iterations; changes and decisions needed in Appendix B) |
 | Date | 2026-09-30 |
 | Owner / sole user | Platform owner: a salaried staff software engineer in India, working solo |
 | Status | Hardened draft for owner review, then handoff to the implementing system |
@@ -15,6 +15,7 @@
 - **§1–§12** cover *what* to build and *why*. **§13** covers *how*, at an architectural level. **§14** is the build order. **§16** lists decisions still open and facts still unverified.
 - **Requirement IDs** (D1, K4, …) are stable; use them in plans and commits. The **Slice** column says when each is built; **S1** there means S1a unless §14 lists the item under S1b. **"Parked"** means not scheduled until its named trigger fires.
 - **MUST / MUST NOT** mark hard requirements. Everything else is default behaviour unless the owner decides otherwise in §16.
+- **Appendices C, D and E** (state machine, after-tax evaluation, Telegram fixtures) are normative: where the prose and an appendix disagree, the appendix wins and the prose is the defect.
 - **"(unverified)"** marks a fact that has not been confirmed from a primary source. Verify it before relying on it (§16.2).
 - **Dates** are estimates assuming 10–12 owner-hours a week (OD-1).
 - **Units:** ₹1 lakh (L) = ₹100,000. ₹1 crore (cr) = ₹10 million. 1 bps = 0.01%.
@@ -284,7 +285,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | E6 | **Kite daily login.** | S1 |
 | | **Flow:** the registered redirect URL is a static page hosted off the VM (or `127.0.0.1`) that shows the `request_token`. The owner sends `/login <request_token>` on Telegram (M1 checks apply), and the gateway exchanges it using the api_secret. | |
 | | **Token storage:** gateway memory plus a file with mode 0600 owned by the gateway's Unix user. **Never logged.** Invalidated via the logout API after the evening pipeline (§13.3 step 6), before 23:59 IST. | |
-| | **Alerts:** no valid token by 08:45 IST; the `UNPROTECTED` flag at 09:05; an "unmanaged positions" alert after 3 consecutive missed logins. | |
+| | **Alerts:** no valid token by 08:45 IST; the `UNPROTECTED` flag at 09:05, repeated every 30 min while a position is held; an "unmanaged positions" alert after 3 consecutive missed logins. | |
 | | **Session lost during market hours** (revoked by the broker, a password change, a lapsed API subscription): set `UNPROTECTED` and alert at once. Nothing can be cancelled without a session, which is why every risk-increasing order carries a broker-side TTL (R8a). The next `/login` runs E4 before anything else. | |
 | E7 | Dhan adapter with Dhan's official TOTP token login (unattended, 24-hour token). | Parked (S4) |
 | E8 | **Static-IP order host.** | S1 (primary) / S4 (secondary) |
@@ -307,7 +308,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 |---|---|---|
 | A1 | **Stages per bot:** BACKTEST → PAPER → APPROVE → AUTO. | S1 (up to APPROVE) |
 | | The platform MUST refuse a promotion unless a **gate-evidence record** exists in `live.sqlite` for that bot and transition, holding one row per §10 criterion (criterion id, measured value, threshold, pass or fail, and an evidence reference: journal row ids or a report path), signed off by the owner in the CLI. | |
-| | Demotions need no record. | |
+| | Demotions need no record. A promotion is refused while any HALTED-severity cause or the epoch breach is set, or while the bot has a pending demotion (Appendix C.7). | |
 | | **Exception:** CLI `promote --research <bot>` may create a Backtest → Paper record flagged `research_only`. The record shows the failed criteria values and is signed off by the owner. It allows the PAPER stage only. Paper → Approve MUST be refused for any bot whose current Backtest → Paper record is `research_only`. | |
 | A2 | **APPROVE flow** for risk-increasing intents. | S1 |
 | | **(a)** A Telegram message shows bot, instrument, side, qty, indicative limit, notional, reason, risk state and `approval_expiry`, with Approve/Reject buttons. | |
@@ -402,7 +403,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | C6 | **Accounts:** only the owner's own in year 1. A later family account (spouse, dependent children, parents) needs its own API key, a daily login by the account holder, a broker IP-sharing declaration (Zerodha) or its own IP (Dhan), and its own tax ledger and X5 profile. Never any third party. | Always |
 | C7 | **Audit log and journal:** append-only with a **hash chain**. Nightly encrypted off-host backup to versioned object storage with a deletion lock. Restore drilled before Paper → Approve and quarterly after that. Kept **8 years** after the end of the tax year, together with the broker contract notes. | S1 |
 | C8 | A monthly Telegram reminder to review new SEBI/NSE circulars (e.g., SEBI's 12 Sep 2026 consultation on the closing auction, market timings and derivative settlement). | S1 |
-| C9 | **DDPI signed and active** with the broker before the first live order. Without DDPI, each API sell of holdings needs a same-day CDSL e-DIS/TPIN authorisation, which unattended exits can't provide (unverified; confirm with Zerodha). A pre-open **sellability check** looks at the Kite holdings API authorised quantity against settled quantity, or a DDPI flag (mechanism unverified, §16.2 #3). On failure it sets the `NOT_FLATTENABLE` flag and alerts. | S1 (before first live order) |
+| C9 | **DDPI signed and active** with the broker before the first live order. Without DDPI, each API sell of holdings needs a same-day CDSL e-DIS/TPIN authorisation, which unattended exits can't provide (unverified; confirm with Zerodha). A **sellability check**, run pre-open and again at every E4 run, looks at the Kite holdings API authorised quantity against settled quantity, or a DDPI flag (mechanism unverified, §16.2 #3). On failure it sets the `NOT_FLATTENABLE` flag and alerts; the next passing check clears it (Appendix C.3). | S1 (before first live order) |
 
 ### 8.11 Options (O) and intraday (I) research tracks
 
@@ -543,7 +544,7 @@ tradebot/
   journal/     decision journal (L1), mistake classes (L2), trial registry (R5), gate records (A1)
   reports/     daily summary (M2), after-tax vs RM/BH (R7)
   ops/         health + heartbeat (M3), backup (C7)
-  cli/         the only path for un-halting, config changes, promotions, drills, external holdings, cash movements (K0), new-epoch
+  cli/         the only path for un-halting (clear-cause, reconcile-ledger), config changes, promotions, drills, external holdings, cash movements (K0), new-epoch
 config/        portfolio.yaml, bots/*.yaml, costs/*.yaml (dated), tax_profile.yaml, external_holdings.yaml
 ```
 
@@ -786,6 +787,7 @@ The full multi-bot platform with the learning loop takes about **9–12 months p
 20. That Kite serves day candles for the `NSE:NIFTY 50` index instrument and that its close matches the niftyindices.com daily report (D3).
 21. Which Kite margins API field reports cash usable for a CNC buy (K4(b)).
 22. How Kite treats an armed GTT across a split or bonus on the underlying (E9).
+23. That the Kite full quote carries the exchange lower and upper price band for ETFs under the 7 Sep 2026 norms, and the tick size from the instrument master (R8a pricing step 1 and 7).
 
 ---
 
@@ -1058,6 +1060,25 @@ Five review passes (internal consistency, specification gaps, failure scenarios,
 3. E9 `backstop_fired`: a GTT fill halts live trading until a CLI review (default: yes).
 4. OD-12: the 0% cash leg handicaps the bot against RM's liquid leg; decide whether that stands at the first gate run.
 5. §16.2 #3 (DDPI covering API sells and GTT on holdings) is the one item that can invalidate the unattended-exit design; it can be asked of Zerodha before any code exists. Items 19–22 join the A6 verification list.
+
+### v1.11 (2026-10-01): second iteration, six further lenses
+
+**Normative appendices added**
+- **Appendix C, state machine:** K1, K5, K7, A5 and E9 restated as tables (state variables, causes with severity and clearing rules, flags, governor evaluation order, the event transition table, placement gating, bot stage transitions, the backtest mapping, and the property list that §13.7 tests). Conflicts the derivation surfaced and fixed: a storage failure blocked flattens (E1 now lets cancels and flattens through via the fallback log); the Decide step emitted risk-increasing intents the gateway would drop every day (§13.3 step 4 now checks state and flags first); promotions are refused under HALTED or a pending demotion (A1); the C9 check re-runs at every E4 run.
+- **Appendix D, after-tax evaluation:** the procedure is now normative (spans and chaining as one continuous simulation with parameter switches at window boundaries; costs; cash-capped sizing; lot cost and deductible expenses, STT never deductible; tax-year set-off and carry-forward; terminal liquidation; non-compounded tax; benchmarks without costs, liquidated once, STCG or LTCG by span length; strict comparison) with a computed worked example. R5, R7, §4.1, §10.2(1) and §11.1 updated to match.
+- **Appendix E, Telegram fixtures:** command grammar, approval card and callback payload, acknowledgements, daily summary, alerts with cadences, and the tests; M1(g) and M2 reference it.
+
+**Specification tightened**
+- §11.1 selection: deterministic tie-break (lower `max_exposure`, then longer `ma_days`), two-decimal comparison, zero-trade points, the `no_qualifying_point` flag.
+- R8a pricing: an eight-step procedure covering quote freshness, the feasible interval from the iNAV, LTP and exchange bands, the premium check at placement and reprice, one-sided books, per-side tick rounding, flatten pricing, zero quantity, drill orders and modification accounting; §13.7 tests added.
+- E6: UNPROTECTED alert cadence. §13.2: the `clear-cause` and `reconcile-ledger` commands. §16.2 #23 added.
+
+**Verification:** attempted again and still blocked by network policy; no §16.2 item changed status.
+
+**Decisions needed from the owner, added in v1.11**
+6. D.1 step 7: tax is treated as paid at the end of the span rather than compounded; accept the small optimism, or deduct each tax year's tax from cash at the tax-year end (more conservative, but it puts a non-market step into NAV unless NAV is kept pre-tax separately).
+7. D.1 step 8: benchmarks bear no transaction costs and are taxed once at LTCG over the chained span, which is the harder, honest bar; confirm.
+8. §11.1 tie-break order (less exposure before fewer switches); confirm or reverse.
 
 ---
 
@@ -1343,7 +1364,7 @@ Format: `[LEVEL] <cause or check> · what happened · what to do · repeats ever
 | NO_BACKSTOP | `[WARN] NO_BACKSTOP · GTT rejected on T1 units (reason) · 1051 units uncovered tonight · log in tomorrow before 09:05 or flatten by hand · repeats every 30 min` | 30 min |
 | backstop_fired | `[HALT] E9 · GTT 3391 filled 1051 @ ₹165.20 · HALTED until clear-cause E9_BACKSTOP from the CLI · no re-entry will be proposed` | once |
 | storage | `[HALT] E1 · live.sqlite not writable · HALTED, cancels and flattens via fallback log · fix storage, then clear-cause E1_STORAGE · repeats every 5 min` | 5 min |
-| Data | `[WARN] D3 · index close 23,150.20 (niftyindices) vs 23,139.90 (Kite) differ by 0.045%... no signal for T` (threshold 0.05%) | once per session |
+| Data | `[WARN] D3 · index close 23,150.20 (niftyindices) vs 23,133.50 (Kite) differ by 0.072% (limit 0.05%) · no signal for T · check both sources` | once per session |
 | Dead man (external) | sent by the heartbeat service, not the platform: subject `tradebot: no check-in for 30 min` | per the service |
 
 ### E.6 Tests
