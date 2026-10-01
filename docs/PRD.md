@@ -63,7 +63,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 
 **Benchmark rules:**
 - Benchmarks use the same evaluation window and the same X5 tax profile as the bot.
-- Interim rebalances are notionally tax-free. Tax is applied once, at liquidation on the last day of the window: equity legs at STCG/LTCG, the liquid-fund leg at the X5 slab rate (including surcharge and cess).
+- Interim rebalances are notionally tax-free. Benchmarks bear no transaction costs or slippage. Tax is applied once, at liquidation on the last session of the evaluation span (Appendix D.1): equity legs at STCG if the span is 365 days or shorter, else LTCG; the liquid-fund leg at the X5 slab rate (including surcharge and cess).
 - A strategy cannot be its own benchmark.
 
 ### 4.2 Platform goals
@@ -154,11 +154,11 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | R2 | **S1:** one bar-replay backtester that drives the live code path (strategy → risk → paper-fill model). **S2:** vectorbt for parameter sweeps, plus the P1 parity check before any vectorbt-researched bot enters PAPER. | S1 → S2 |
 | R3 | **Versioned cost model** per broker, segment and product, with effective-from dates. It covers brokerage, STT, exchange transaction charges, SEBI fee, stamp duty, GST, DP charges and the auto square-off fee (Appendix A.2). S1 needs only the Zerodha ETF/equity delivery rows. Until dated historical rows are added, backtests apply the **current** rate card to all history, which is conservative. Validated against contract notes (X6). | S1 |
 | R4 | **Slippage model.** S1 static default: **5 bps per side** for liquid ETFs. S3: calibrated from measured slippage (T3) and from the open-vs-fill gap (R8). | S1 → S3 |
-| R5 | **Walk-forward** plus a **trial registry**. Anchored walk-forward (defaults: 5-year train, 1-year test, 1-year step; configurable). Each bot's research config declares a parameter grid. The pass rule is on the chained OOS result. **Every grid point evaluated is logged** as a trial (strategy, params, data window, result); the trial count feeds R10. The S1 specifics are in §11.1. | S1 |
+| R5 | **Walk-forward** plus a **trial registry**. Anchored walk-forward (defaults: 5-year train, 1-year test, 1-year step; configurable). Each bot's research config declares a parameter grid. The chained OOS result is one continuous simulation over the test windows, with the selected parameters switching at each window boundary as the live re-selection would (§11.1, Appendix D.1); the pass rule is on that result. **Every grid point evaluated is logged** as a trial (strategy, params, data window, result); the trial count feeds R10. The S1 specifics are in §11.1. | S1 |
 | R6 | Combinatorial purged cross-validation, with purge and embargo each at least the label horizon (skfolio defaults both to 0), and the probability of backtest overfitting (PBO). | Parked (with L7) |
-| R7 | **After-tax reporting** per tax year and bucket (X1), against RM and BH (and PF for factor bots), using the X5 profile. | S1 |
-| | Set-off rules: short-term capital losses offset STCG first, then LTCG; long-term capital losses offset only LTCG; carry-forward for 8 years. | |
-| | Positions still open at the end of the window are liquidated on the last day. | |
+| R7 | **After-tax reporting** per tax year and bucket (X1), against RM and BH (and PF for factor bots), using the X5 profile. The evaluation procedure (spans, costs, sizing, lots, tax-year assessment, liquidation, benchmark treatment) is normative in **Appendix D.1**, with a worked example in D.2. | S1 |
+| | Set-off rules, applied within each tax year (1 Apr to 31 Mar): short-term capital losses offset STCG first, then LTCG; long-term capital losses offset only LTCG; a net loss carries forward to later tax years in the span for up to 8 years and is worth nothing beyond the span. | |
+| | Positions still open at the end of the span are liquidated on its last session at that session's close less R4 slippage, with sell charges, as a strategy exit. Cost of acquisition includes buy charges; sale expenses other than STT are deductible; STT never is. After-tax value = pre-tax terminal value − the sum of tax assessed per tax year, not compounded, for the bot and the benchmarks alike; NAV and capital (K0) stay pre-tax. | |
 | | Current tax rates apply to all history (conservative). | |
 | R8 | **Execution timing,** the same for all modes. | S1 |
 | | The decision uses session-T close data. The intent and approval request go out on the evening of T. Placement happens in the bot's order window on T+1, the next trading session per D2 (default 09:20–10:30 IST), following R8a. AMOs are disabled. | |
@@ -435,7 +435,7 @@ A1 enforces every promotion through a recorded gate-evidence record.
 
 | Transition | Entry criteria (all required) |
 |---|---|
-| **Backtest → Paper** | (1) R5 chained OOS return after costs and tax (R7), measured over the union of the OOS test windows, is strictly greater than **RM** computed over the same dates; factor bots must also beat **PF** the same way. (2) The governed backtest's **epoch max drawdown** (K0, over the whole backtest) is ≤ `risk.max_drawdown_pct`, and the governor never reaches HALTED. (3) All trials are logged in R5; DSR is reported from S3 (R10). (4) From S2, parity per P1. |
+| **Backtest → Paper** | (1) R5 chained OOS return after costs and tax (R7), measured over the chained OOS span per Appendix D.1, is strictly greater than **RM** over the same span (compared at two decimal places in percentage points); factor bots must also beat **PF** the same way. (2) The governed backtest's **epoch max drawdown** (K0, over the whole backtest) is ≤ `risk.max_drawdown_pct`, and the governor never reaches HALTED. (3) All trials are logged in R5; DSR is reported from S3 (R10). (4) From S2, parity per P1. |
 | **Paper → Approve** | (1) At least 2 calendar months of paper, counted from the date of the Backtest → Paper gate record or of the K7 demotion switch; bots with `planned_turnover` above 50/yr also need at least 50 paper trades, a trade being a filled order. (2) Execution checklist completed, naturally or through A6 paper drills: order placed and filled; a rejection handled; clean reconciliation; a process restart survived; a holiday handled; a corporate action booked (if relevant). Each item is evidenced by a journal row referenced from the gate record. (3) Paper slippage within T3, measured at real quotes (E3). (4) Prerequisites: DDPI active (C9); static IP registered and egress check passing (E8); E9 GTT place/modify/delete and Kite TTL validity verified in A6; backup restore drilled (C7); Telegram 2-step verification confirmed by the owner (M1(d)); **OD-7 decision recorded with the CA's name and date**. (5) A6 live smoke test completed, ending flat, with fills within T3. |
 | **Approve → Auto** | At least 4 weeks in APPROVE and at least 5 approved intents that reached FILLED. Zero unexplained reconciliation mismatches. `/halt` and `/flatten` each executed at least once on the live account (the A6 smoke-test drills count), with a journaled drill record. AUTO itself is parked (S4). |
 | **Capital scale-up** | (1) **At least 12 months live in the current epoch,** counted from the latest date the portfolio entered APPROVE or AUTO. Any all-bots demotion to PAPER, or a new epoch, restarts the clock. The window MUST contain a **full cycle**: at least one Nifty 50 drawdown of 8% or more from peak; if not, extend until it does. (2) Return after costs and tax above **RM** (factor bots also above PF; BH reported). (3) **Epoch max drawdown under 15%** (K0). (4) No K7(1) demotion in the window, and the latest 60-session Sharpe and return inside the §10.1 band. (5) **Live DSR on excess return over RM ≥ 0.95,** with the registry trial count (R10). Then ramp capital in 1.5–2× steps, re-gating each step. Caveat: 12 months of daily data confirms only a true Sharpe of about 1.65 or higher *against zero* (Appendix A.4). Against a benchmark, the excess-return bar is higher, and more bots raise it further, so criterion (5) can take longer than 12 months. |
@@ -468,7 +468,7 @@ The figures below are secondary-source numbers that have not been independently 
 - **Backtest window:** from 2007-01-01 (using the D10 pre-2013 liquid-fund proxy) to the latest session. It MUST include 2008.
 - **Position:**
   - target ₹ = `target_exposure` × `max_exposure` × `allocation` × capital (K0).
-  - qty = floor(target ₹ / NIFTYBEES close on T).
+  - qty = min(floor(target ₹ / NIFTYBEES close on T), the largest quantity that available cash covers at the fill price plus estimated buy charges). When the cash cap binds, the order is journaled as capped (K4(b)); Appendix D.2 shows the case.
   - Trade only if abs(target ₹ − current ₹) > 5% of capital.
   - **No rebalancing within a regime:** a price move in the held position never triggers a trade.
   - **Exception, K1 halving:** governor-driven target changes are not rebalancing. When the −6% halving engages and abs(governed target ₹ − current ₹) > 5% of capital, a **trim** sell is emitted as a risk_reducing intent (A5, no approval, strategy-exit window). When the halving lifts, the **top-up** buy is a risk_increasing intent under A2 and the R8a re-emission rule. The bar-replay backtest applies the same rule.
@@ -1193,3 +1193,71 @@ Over any sequence of C.5 events:
 14. `new-epoch` resets `epoch_peak` and `ref_peak` to NAV and leaves every bot in PAPER.
 15. In backtests, the epoch peak never resets and gate criterion (2) fails whenever K1_EPOCH was set.
 
+---
+
+# Appendix D: After-tax evaluation procedure and worked example
+
+### D.1 Procedure (normative for R7, R5 chaining, §4.1 and §10.2 criterion (1))
+
+1. **Span and windows.** An evaluation span is one window (a train window for the §11.1 selection, or a single report) or the chained OOS span: one continuous simulation from the first session of the first test window to the last session of the last, in which the selected parameters switch at each window boundary exactly as the live annual re-selection would (§11.1). Positions and tax lots carry across boundaries; nothing is liquidated at a boundary.
+2. **Costs.** Every fill pays the R3 charges in force on its date (the current rate card for all history until dated rows exist) and R4 slippage: a buy fills at the T+1 open × (1 + 5 bps), a sell at the T+1 open × (1 − 5 bps).
+3. **Sizing.** qty = min(floor(target ₹ / close on T), the largest quantity that available cash covers at the fill price plus buy charges). When the cash cap binds, the order is journaled as capped (K4(b)).
+4. **Tax lots (X1).** Cost of acquisition = fill price + buy charges per unit (brokerage, exchange, SEBI fee, stamp duty, GST). Net sale consideration = gross − sale charges other than STT (exchange, SEBI fee, GST, DP charge). STT is never deductible. Lots are matched FIFO per demat account per ISIN; the holding period runs from the lot's fill date to the sale date; 365 days or fewer is STCG, more is LTCG.
+5. **Tax-year assessment.** Realised gains are bucketed by tax year (1 Apr to 31 Mar). Within each tax year: short-term losses offset STCG, then LTCG; long-term losses offset only LTCG; a net loss carries forward to later tax years in the span for up to 8 years, and a loss still unused at the end of the span is worth nothing. Tax = net STCG × 20% + net LTCG above the X5 exemption × 12.5%, each multiplied by (1 + surcharge) × (1 + cess) from X5.
+6. **Liquidation.** On the last session of the span, every open position is sold at that session's close × (1 − 5 bps) with sell charges, as a strategy exit; the gain belongs to that tax year.
+7. **After-tax value.** After-tax terminal value = pre-tax terminal value after all costs − the sum of tax assessed over the span's tax years. Tax is not compounded: it is treated as paid at the end, for the bot and the benchmarks alike (a small optimism, since the live account pays advance tax during the year from outside the platform, X2). NAV and capital (K0) stay pre-tax, so the governor never sees a tax step.
+8. **Benchmarks (§4.1).** RM and BH hold from the first session of the span, bear no transaction costs or slippage, and are liquidated once on the last session; RM is rebalanced to 50/50, notionally tax-free, on the first session of each month. The equity leg's cumulative P&L is taxed as STCG when the span is 365 days or shorter and as LTCG otherwise; the liquid leg's P&L at the slab rate. Over the chained OOS span the benchmarks therefore pay LTCG while the bot's frequent switches mostly pay STCG; that asymmetry is real and intended.
+9. **Comparison.** "Beats" means a strictly greater after-tax return over the same span, compared at two decimal places in percentage points.
+10. **Reporting (R7).** The same ledger yields the per-tax-year, per-bucket report; per-bot figures are allocations of the account-level result.
+
+### D.2 Worked example: one evaluation window, hypothetical prices
+
+Window 2023-01-02 to 2023-12-29 (the 2023 OOS test year), starting capital ₹2,00,000 in cash, `allocation` 1.0, selected `max_exposure` 1.0 and `ma_days` 100. Prices are invented to exercise every rule; they are not market data. Charges are the Appendix A.2 Zerodha rate card for equity ETF delivery; slippage is the R4 default of 5 bps per side; the tax profile is the X5 default (STCG 20%, LTCG 12.5%, slab 30%; surcharge 15% on capital gains and 25% on slab income; cess 4%), giving effective rates of 23.92% STCG, 14.95% LTCG and 39.00% slab.
+
+**D.2.1 Fills and charges**
+
+| Event | Signal day T | Fill day | Close on T | Open on T+1 | Fill price (±5 bps) | Qty | Notional | Exchange | SEBI | Stamp | STT | GST | DP | Charges |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Buy | 2023-01-20 | 2023-01-23 | 189.50 | 190.00 | 190.10 | 1051 | ₹199,795.10 | ₹6.13 | ₹0.20 | ₹29.97 | ₹0.00 | ₹1.14 | ₹0.00 | ₹37.44 |
+| Strategy exit | 2023-06-15 | 2023-06-16 | 205.00 | 208.00 | 207.90 | 1051 | ₹218,502.90 | ₹6.71 | ₹0.22 | ₹0.00 | ₹2.19 | ₹1.25 | ₹15.34 | ₹25.71 |
+| Buy | 2023-09-20 | 2023-09-21 | 198.00 | 199.00 | 199.10 | 1097 | ₹218,412.70 | ₹6.71 | ₹0.22 | ₹32.76 | ₹0.00 | ₹1.25 | ₹0.00 | ₹40.94 |
+| Liquidation (R7) | 2023-12-29 | 2023-12-29 | 195.00 (last close) | – | 194.90 | 1097 | ₹213,805.30 | ₹6.56 | ₹0.21 | ₹0.00 | ₹2.14 | ₹1.22 | ₹15.34 | ₹25.47 |
+
+- **Buy 1 sizing:** target ₹ = 1.0 × 1.0 × ₹2,00,000; qty by the §11.1 rule = floor(2,00,000 / 189.50) = 1055; the largest quantity that cash covers at the fill price plus buy charges is 1051; the order is placed for **1051**, journaled as capped by cash (K4(b)). Cash after: ₹167.46.
+- **Strategy exit:** sells the whole lot (1051 units, settled). Net proceeds ₹218,477.19; cash after ₹218,644.65.
+- **Buy 2 sizing:** capital (K0) is now ₹2,00,000 + cumulative P&L after charges = ₹218,644.65 (no tax deducted). Target qty = floor(218644.65 / 198.00) = 1104; cash covers 1097; placed for **1097**.
+- **Liquidation (R7):** the position still open on the last session is sold at that session's close less 5 bps, with sell charges, exactly like a strategy exit. Terminal cash (pre-tax value after all costs): **₹213,970.84**, a pre-tax return of **6.99%**.
+
+**D.2.2 Tax lots and realised gains (X1, FIFO)**
+
+| Sale | Qty | Gross | Deductible sale expenses (all charges except STT) | Net consideration | Cost of acquisition (fill + buy charges) | Days held | Bucket | Gain |
+|---|---|---|---|---|---|---|---|---|
+| Strategy exit 2023-06-16 | 1051 | ₹218,502.90 | ₹23.52 | ₹218,479.38 | ₹199,832.54 | 144 | STCG | ₹18,646.84 |
+| Liquidation (R7) 2023-12-29 | 1097 | ₹213,805.30 | ₹23.33 | ₹213,781.97 | ₹218,453.64 | 99 | STCG | ₹-4,671.67 |
+
+- Tax year 2022-23 (window start to 31 Mar 2023): no realisation, tax ₹0.00.
+- Tax year 2023-24 (1 Apr to window end): STCG ₹18,646.84 and STCL ₹4,671.67. Set-off order (R7): the short-term loss offsets STCG first, leaving net STCG **₹13,975.17**; nothing remains to offset LTCG and nothing carries forward. Tax = ₹13,975.17 × 23.92% = **₹3,342.86**.
+- **After-tax terminal value** = ₹213,970.84 − ₹3,342.86 = **₹210,627.98**, an after-tax return of **5.31%**.
+
+**D.2.3 Benchmarks over the same window**
+
+Hypothetical series: Nifty 50 TRI +6.00% and the RM liquid fund NAV +6.50% over the window, each at a constant monthly rate. RM is rebalanced to 50/50 on the first session of each month, notionally tax-free, and bears no transaction costs (R7). It is liquidated on the last session: the equity leg's cumulative P&L is taxed as STCG because the window is shorter than 12 months, the liquid leg's at the slab rate.
+
+| Benchmark | Terminal value (pre-tax) | Equity-leg P&L | Liquid-leg P&L | Tax | After-tax terminal | After-tax return |
+|---|---|---|---|---|---|---|
+| RM (50/50, monthly rebalance) | ₹212,499.46 | ₹6,006.54 at 23.92% | ₹6,492.92 at 39.00% | ₹3,969.00 | ₹208,530.46 | **4.27%** |
+| BH (Nifty 50 TRI) | ₹212,000.00 | ₹12,000.00 at 23.92% | – | ₹2,870.40 | ₹209,129.60 | 4.56% |
+| **Bot (etf-trend-v1)** | ₹213,970.84 | net STCG ₹13,975.17 at 23.92% | – | ₹3,342.86 | ₹210,627.98 | **5.31%** |
+
+For this window the bot's after-tax return (5.31%) is strictly greater than RM's (4.27%), so the window contributes a pass to §10.2 criterion (1); BH is reported, never gated. Over the full chained span the equity legs of RM and BH would be taxed as LTCG, because they are liquidated once at the end of the span (D.1 step 6), which raises the bar for the bot.
+
+### D.3 What the example pins down
+
+- Sizing uses the close on T for the target quantity and the fill price plus charges for affordability; the smaller wins and the cap is journaled (buy 1 and buy 2 above).
+- Capital for the next target is pre-tax: ₹2,00,000 plus cumulative P&L after charges, never the broker balance (buy 2).
+- Buy charges enter the cost of acquisition; sale charges other than STT reduce the consideration; STT (₹2.19 and ₹2.14 above) is paid but never deducted.
+- Holding periods are counted in days from the lot's fill date; both sales here are STCG.
+- Set-off runs inside the tax year: the December loss offsets the June gain before any rate applies.
+- The terminal liquidation is priced like a strategy exit (close less slippage, full sell charges including the DP charge).
+- Benchmarks pay no transaction costs, are liquidated once, and are taxed by leg; the liquid leg's slab-rate tax is the larger part of RM's tax bill.
+- After-tax values subtract tax from the pre-tax terminal value without compounding; the governor's NAV is unaffected.
