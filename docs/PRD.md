@@ -166,9 +166,15 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | The gap between the T+1 open and the actual fill is journaled (L1) and folded into R4 in S3. | |
 | R8a | **Order placement algorithm.** | S1 |
 | | **Drift check at placement:** drift = abs(LTP − T close) / T close. If drift > `risk.drift_pct` (default 2%), a risk-increasing intent is dropped, journaled and alerted. Risk-reducing intents proceed. | |
-| | **Limit price:** buy = min(best ask, iNAV × (1 + band)); sell = max(best bid, iNAV × (1 − band)), where band = `risk.inav_band_bps`. Without iNAV, use the LTP band (K4(d)). | |
-| | **Premium check (risk-increasing orders):** if abs(LTP / iNAV − 1) exceeds `inav_band_bps`, skip the order, journal it and alert (K4(d)). | |
-| | **Exit pricing (risk-reducing orders):** use the sell formula above. Switch to the best bid, clamped to the exchange price band, only when (d) would block the order or the order is a K1 flatten or `/flatten`. Raise one alert per order, not one per reprice. | |
+| | **Pricing procedure,** run at every placement and every reprice: | |
+| | (1) **Quote.** Fetch the full quote: LTP, best bid, best ask, the exchange lower and upper price band, and the iNAV (D10). The quote must be 10 s old or newer (K4(f)) and the iNAV 60 s old or newer, else `inav_unavailable` is set. If the quote itself is missing or stale, skip this cycle without a modification; after 5 consecutive skipped cycles alert once. | |
+| | (2) **Reference and band.** ref = iNAV and band = `inav_band_bps` / 10⁴ when iNAV is available; otherwise ref = LTP and band = `ltp_band_pct` / 100. The **feasible interval** is [ref × (1 − band), ref × (1 + band)] ∩ [LTP × (1 − `ltp_band_pct`/100), LTP × (1 + `ltp_band_pct`/100)] ∩ [exchange lower band, exchange upper band]. | |
+| | (3) **Premium check (risk-increasing orders, at first placement and at every reprice):** if abs(LTP / ref − 1) > band, or the feasible interval is empty, nothing is placed or modified. At first placement the intent ends DROPPED_CHECK, journaled and alerted; on a reprice the order rests unchanged, with one alert per order. | |
+| | (4) **Buy limit (entries, top-ups, drill buys):** min(best ask, upper end of the feasible interval), rounded **down** to the tick. With no best ask (one-sided book), the upper end of the feasible interval, rounded down. | |
+| | (5) **Sell limit, strategy exits and trims:** max(best bid, ref × (1 − band)) clamped into the exchange band, rounded **up** to the tick; the K4(d) bands do not apply to exits (K4(j)), only the exchange band does. If the ETF trades outside the band (abs(LTP / ref − 1) > band), or there is no best bid, use the best bid clamped into the exchange band instead, or the exchange lower band when there is no bid, with one alert per order. | |
+| | (6) **Sell limit, flattens (K1, `/flatten`, K7) and GTT-adopted orders while a flatten is pending:** best bid clamped into the exchange band, rounded up to the tick; with no best bid, the exchange lower band. One alert per order, not per reprice. | |
+| | (7) **Tick, quantity, drills.** The tick comes from the Kite instrument master (₹0.01 for NSE cash). A computed quantity of 0 ends the intent DROPPED_CHECK. A partial fill is booked at once and the remainder keeps repricing. A6 drill orders carry an explicit limit and bypass (4)–(6) but not (1)–(3). | |
+| | (8) **Modification accounting.** A reprice that yields the same limit as the resting order is not sent and does not count against the cap; skipped cycles do not count either. The drift check runs once, at first placement, never on a reprice. | |
 | | **Repricing:** every 60 s, up to 10 modifications per order. When a **risk-increasing** order hits the cap, it stops being modified and rests at its last limit until `order_expiry`. When a **risk-reducing** order hits the cap, it is cancelled and re-placed as a new order with a new E5 tag, again with at most 10 modifications. The E1 rate limits and the broker's 25-modification cap are never exceeded. | |
 | | **Broker-side expiry (MUST):** every risk-increasing and drill order is placed with Kite `validity=TTL` and `validity_ttl` = whole minutes left until its `order_expiry` (rounded down, minimum 1), re-set on every modification. The broker then expires the order even if the platform is dead, logged out or E8-halted. Verified in A6 (§16.2 #18). If TTL is not accepted, the fallback is that a risk-increasing order never rests: any unfilled remainder is cancelled after each 60 s reprice attempt. | |
 | | **Expiry:** at `order_expiry` the unfilled remainder of a risk-increasing order is cancelled and the order ends EXPIRED. Risk-reducing remainders are re-issued under A5. | |
@@ -657,6 +663,7 @@ research:
   - strategy, including purity (same view → same output; the module imports nothing that does I/O); cost calculator;
   - governor: backtest re-entry, a second −12% leg after a reference-peak reset triggering the epoch breach, and the −6% halving applied to the target;
   - K4 checks: the (j) exemptions including intraday flatten outside the order window, and (k);
+  - R8a pricing procedure: one-sided book, empty feasible interval, iNAV fallback to the LTP band, tick rounding direction per side, zero quantity, modification accounting;
   - FIFO lots including external lots; calendar and settlement dates; NAV/units.
 - **State-machine invariants** (MUST). K5/K7/A5/K1/E9 are implemented as one explicit transition table, **Appendix C**, which is the source of truth where the prose and the table disagree. Property-based tests over random event sequences (breaches, E4 mismatches, E8, `/halt`, `/flatten`, demotions, fills, restarts, GTT fills, storage failures) assert the properties in C.9, which include:
   - a cause never lowers the state set by another;
@@ -680,6 +687,7 @@ research:
   - data and session: stale or holiday-duplicate file, token expiry, IPv6 egress;
   - execution: reconciliation mismatch, untagged manual fill, broker rejection, modification cap, gateway killed between the E9 GTT reduction and the sell placement, quote API down during the order window, token revoked mid-window, `live.sqlite` write failure, E4(0) sync failure, GTT fill while the platform is alive;
   - approvals: Telegram nonce reuse or late tap, iNAV unavailable;
+  - pricing: one-sided quote, ETF outside the iNAV band at a reprice, exchange band narrower than the iNAV band;
   - settlement: the T1 sell block.
 
 ### 13.8 Recurring cost (S1)
