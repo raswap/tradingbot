@@ -236,7 +236,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | (iv) Under an **E8** halt no API orders are sent at all. Alerts go out every 5 min with the manual Kite-app runbook (§13.6: cancel open tradebot orders, delete the GTT, then flatten). Each alert lists every open tradebot-tagged order (id, side, qty) and every live GTT id and qty from the last successful E4(0) sync. | |
 | | (v) **Flatten sizing:** every flatten (K1 reference or epoch, `/flatten`, K7) sizes each ISIN at min(ledger qty, broker (settled + T1) qty − `external_holdings` qty) − the quantity in open sell orders, including any E9 GTT-triggered order (which the flatten adopts per K5(vi)). It is recomputed after the E4(0) sync before every placement and re-placement. The E9 GTT is reduced or deleted first, per E9 Coordination. A flatten therefore never sells the owner's external units. | |
 | | (vi) **E9 is exempt from states:** the E9 GTT and any order it has triggered are never cancelled by a state change. E9 place, modify and re-arm are not "new orders" for K4(k) or K5. They continue in every state and flag, and stop only under an E8 halt or with no valid session. The only reductions or deletions are the ones E9 Coordination makes just before a platform sell is placed, and the deletion when the sub-ledger is flat. **Adoption:** with a valid session and no E8 halt, an open, not-fully-filled GTT-triggered order is adopted at the next E4(0) sync as a risk-reducing platform order. It is repriced under R8a exit pricing (best bid clamped to the exchange band when a K1, `/flatten` or K7 flatten is pending), its modifications count against the per-order cap, and at the cap it is cancelled and re-placed with a new E5 tag, sized per K5(v). State changes still never cancel it. | |
-| | **Precedence:** each state cause (K1 reference, K1 epoch, K7, E4, E8, E9 `backstop_fired`, E1 `storage`, `/halt`, `/flatten`) is recorded and journaled separately. The effective state is the most restrictive active cause: HALTED > REDUCING > ACTIVE. A cause never lowers the state set by another. Each cause is cleared separately from the CLI, and an epoch-breach HALTED clears only via `new-epoch`. | |
+| | **Precedence:** each state cause (K1 reference, K1 epoch, K7, E4, E8, E9 `backstop_fired`, E1 `storage`, `/halt`, `/flatten`) is recorded and journaled separately. The effective state is the most restrictive active cause: HALTED > REDUCING > ACTIVE. A cause never lowers the state set by another. Each cause is cleared separately from the CLI (`clear-cause <cause>`, with the per-cause preconditions in Appendix C.2), and an epoch-breach HALTED clears only via `new-epoch`. Appendix C is the normative statement of these rules. | |
 | | **Status flags** (not states): | |
 | | `UNPROTECTED`: no valid broker token between 09:05 IST and the close on a trading day. Blocks placement of risk-increasing orders (K4(k)). | |
 | | `NOT_FLATTENABLE`: the C9 check failed. Blocks placement of risk-increasing orders (K4(k)). | |
@@ -258,7 +258,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | E1 | **One order path.** | S1 → S2 |
 | | **Gateway service:** in S1, one long-running service runs the in-session scheduler, the Telegram poller and the gateway module. Only it can call a broker order API. It owns the broker session, **one API key per broker account**, the rate limiter, the K4 checks and the audit log. | |
 | | **Rate limits:** at most **5 orders/s**, plus the broker's per-minute and per-day caps (Kite: 10/s, 400/min, 5,000/day). | |
-| | **Writers:** it is the only writer of `live.sqlite` (orders, fills, ledger, tax lots, journal, gate records). **Fail closed:** if the audit log or `live.sqlite` cannot be written, no order is sent or modified; cancels are still attempted and recorded in a plain append-only fallback file for later reconciliation, open risk-increasing orders expire by TTL, and the gateway sets HALTED with cause `storage`, alerting every 5 min. | |
+| | **Writers:** it is the only writer of `live.sqlite` (orders, fills, ledger, tax lots, journal, gate records). **Fail closed:** if the audit log or `live.sqlite` cannot be written, no risk-increasing or strategy-exit order is sent or modified; cancels and flattens are still attempted and recorded in a plain append-only fallback file for later reconciliation, open risk-increasing orders expire by TTL, and the gateway sets HALTED with cause `storage`, alerting every 5 min. The CLI clear is refused until a write test passes. | |
 | | **Batch jobs:** ingest, the D5 archiver, backtests and reports run as systemd timers or CLI jobs. They write Parquet or `research.sqlite` (trial registry, backtest results) and never call broker order APIs. | |
 | | **Commands:** the CLI and Telegram send commands to the service. | |
 | | **S2:** the gateway moves into its own process once B3 adds bot processes. | |
@@ -552,7 +552,7 @@ The cycle below runs from the close of session T to the close of session T+1, th
 1. **After the close of T (~15:45 IST). Wrap up.** Reconcile (E4), import contract notes and tradebook (X6), write the journal. The Kite session stays valid for the evening pipeline.
 2. **19:00. Ingest signal inputs.** Bhavcopy, Kite day candle (needs the still-valid token), Nifty 50 price close, corporate actions. Retry per §9, then run the D3 checks. A failure means no signal for T and an alert.
 3. **Ingest benchmark series separately.** Nifty 50 TRI and AMFI NAV run on their own schedule, retrying until 09:00 on T+1 and alerting if still missing. They **never** block or delay a signal or intent.
-4. **Decide** (no earlier than `schedule.signal`, 20:00). Gated **only** on signal and K4 inputs for session T: the NIFTYBEES bhavcopy (D1), the Nifty 50 price-index close, the D3 Kite day-candle cross-check, and D6 corporate actions for the S1 ISIN. If they haven't passed by 20:30, no signal is computed for T (§9). The strategy view MUST assert that its latest bar is session T (from D2); otherwise no intent is emitted, and the run is journaled as `data` and alerted. Then: strategy target (§11.1), compared with the ledger position, then the K1 governor, then an intent. A risk-increasing intent goes to Telegram (`approval_expiry` 09:15 on T+1). A risk-reducing intent is queued automatically (A5).
+4. **Decide** (no earlier than `schedule.signal`, 20:00). Gated **only** on signal and K4 inputs for session T: the NIFTYBEES bhavcopy (D1), the Nifty 50 price-index close, the D3 Kite day-candle cross-check, and D6 corporate actions for the S1 ISIN. If they haven't passed by 20:30, no signal is computed for T (§9). The strategy view MUST assert that its latest bar is session T (from D2); otherwise no intent is emitted, and the run is journaled as `data` and alerted. Then: strategy target (§11.1), compared with the ledger position, then the K1 governor, then an intent. A risk-increasing intent goes to Telegram (`approval_expiry` 09:15 on T+1), but only if the portfolio state is ACTIVE and no blocking flag is set at Decide time; otherwise none is emitted, the condition is journaled once as `risk_state_blocked` and shown in the summary, and the R8a re-emission rule re-evaluates it the next evening. A risk-reducing intent is queued automatically (A5) whatever the state; under a pausing cause it is held (K5).
 5. **After Decide. Summary.** Send the daily summary (M2), including pending intents for T+1.
 6. **Evening close-out.** Arm or modify the E9 GTT for the covered qty (settled units plus T1 units settling on the next session, E9). Then log out through the Kite logout API (C4, E6) once steps 4–5 finish, never later than 23:59 IST. Back up (C7). The heartbeat pings after every step (M3).
 7. **08:30 on T+1. Pre-open checks.** Kite login via `/login` (E6), egress-IP check (E8), sellability check (C9), E9 GTT check: confirm it is still armed for the covered qty and re-arm if not. **09:00:** reconcile (E4).
@@ -658,7 +658,7 @@ research:
   - governor: backtest re-entry, a second −12% leg after a reference-peak reset triggering the epoch breach, and the −6% halving applied to the target;
   - K4 checks: the (j) exemptions including intraday flatten outside the order window, and (k);
   - FIFO lots including external lots; calendar and settlement dates; NAV/units.
-- **State-machine invariants** (MUST). K5/K7/A5/K1 are implemented as one explicit transition table, with property-based tests over random event sequences (breaches, E4 mismatches, E8, `/halt`, `/flatten`, demotions, fills, restarts). The tests assert:
+- **State-machine invariants** (MUST). K5/K7/A5/K1/E9 are implemented as one explicit transition table, **Appendix C**, which is the source of truth where the prose and the table disagree. Property-based tests over random event sequences (breaches, E4 mismatches, E8, `/halt`, `/flatten`, demotions, fills, restarts, GTT fills, storage failures) assert the properties in C.9, which include:
   - a cause never lowers the state set by another;
   - no order is placed, modified or re-placed unless an E4(0) sync succeeded within the last 2 minutes;
   - risk-increasing orders are placed only in ACTIVE with no blocking flag;
@@ -1048,3 +1048,148 @@ Five review passes (internal consistency, specification gaps, failure scenarios,
 3. E9 `backstop_fired`: a GTT fill halts live trading until a CLI review (default: yes).
 4. OD-12: the 0% cash leg handicaps the bot against RM's liquid leg; decide whether that stands at the first gate run.
 5. §16.2 #3 (DDPI covering API sells and GTT on holdings) is the one item that can invalidate the unattended-exit design; it can be asked of Zerodha before any code exists. Items 19–22 join the A6 verification list.
+
+---
+
+# Appendix C: State machine (normative for K1, K5, K7, A5, E9)
+
+This appendix restates §8.4–§8.6 as tables. Where the prose and these tables disagree, the tables win and the prose is a defect to fix in the next PRD revision. The §13.7 property tests are the properties in C.9, generated over the events in C.5. Scope is S1 (portfolio-level state, one live bot); S2 adds the same machine per bot under the K5 precedence rule.
+
+### C.1 State variables (portfolio)
+
+| Variable | Values | Derivation or source |
+|---|---|---|
+| `causes` | subset of {K1_REF_REDUCE, K1_REF_HALT, K1_EPOCH, K7, E4, E8, E9_BACKSTOP, E1_STORAGE, CMD_HALT, CMD_FLATTEN} | each entry carries its set time and journal row (K5 precedence) |
+| `state` | ACTIVE, REDUCING, HALTED | **derived, never stored:** HALTED if any cause of HALTED severity is set; else REDUCING if any cause of REDUCING severity is set; else ACTIVE |
+| `halved` | bool | governor modifier on effective `max_exposure` (K1); not a cause |
+| `flags` | subset of {UNPROTECTED, NOT_FLATTENABLE, NO_BACKSTOP, INAV_UNAVAILABLE} | automatic (C.3) |
+| `ref_peak`, `epoch_peak`, `epoch_id` | ₹, ₹, integer | K0 |
+| `session` | NONE, VALID | E6 |
+| `sync_age` | seconds since the last successful E4(0) sync | E4 |
+| per bot: `stage`, `demotion_pending` | BACKTEST, PAPER, APPROVE, AUTO; bool | A1, K7 |
+
+### C.2 Causes
+
+| Cause | Severity | Pausing | Set by | Cleared by (CLI unless stated) | Actions on set |
+|---|---|---|---|---|---|
+| K1_REF_REDUCE | REDUCING | no | fresh NAV mark with reference drawdown ≤ `governor.reduce` | `clear-cause`; owner confirms `ref_peak := NAV` | cancel-on-entry (C.5 #3) |
+| K1_REF_HALT | HALTED | no | fresh NAV mark with reference drawdown ≤ `governor.halt` | `clear-cause`; owner confirms `ref_peak := NAV`; the bots stay demoted | cancel all bot orders; issue flatten (A5); demote all live bots (K7(4), C.7) |
+| K1_EPOCH | HALTED | no | fresh NAV mark with epoch drawdown ≤ −(`hard_drawdown_limit` − 3) | **`new-epoch` only**, and only when every live sub-ledger is flat and no bot order is open | as K1_REF_HALT |
+| K7 | REDUCING (S1: portfolio; S2: that bot) | no | K7 rules (1)–(3) for a bot, or (4) for all bots | `clear-cause`, accepted only after the bot's stage switch to PAPER (C.7) | cancel-on-entry for the bot; issue flatten of its live position (an in-flight K1 or CMD_FLATTEN flatten counts); `demotion_pending := true` |
+| E4 | HALTED | **yes** | the second consecutive unexplained mismatch (E4(d)), or an untagged fill (E4(e)) | `reconcile-ledger` after the owner corrects the ledger or `external_holdings.yaml` | cancel all bot orders (flattens and E9 orders continue); alert every 30 min |
+| E8 | HALTED | **special: no API call of any kind** | egress check fails at startup or in an M3 check | `clear-cause`, refused unless a fresh egress check passes | nothing can be cancelled; alert every 5 min with the open-order and GTT list and the §13.6 runbook |
+| E9_BACKSTOP | HALTED | **yes** | a GTT fill is booked (E9 Booking) | `clear-cause` | cancel all bot orders (flattens continue); alert |
+| E1_STORAGE | HALTED | **yes**, except that cancels and flattens go out and are logged to the fallback file | audit log or `live.sqlite` unwritable | `clear-cause`, refused until a write test passes | attempt cancels of risk-increasing and strategy-exit orders; alert every 5 min |
+| CMD_HALT | HALTED | **yes** | `/halt` or CLI `halt` | `clear-cause` | cancel all bot orders (flattens continue); alert every 30 min |
+| CMD_FLATTEN | HALTED | no | `/flatten` confirmed within 30 s, or CLI `flatten` | `clear-cause` | cancel all bot orders; issue flatten of every live bot position |
+
+"Pausing" means strategy exits and trims are held, not placed and not re-issued, until the cause clears (A5). Flattens are never held except under E8 or with no session; under E1_STORAGE they are placed and logged to the fallback file.
+
+### C.3 Flags
+
+| Flag | Set when | Cleared when | Effect |
+|---|---|---|---|
+| UNPROTECTED | no valid session between 09:05 IST and the close on a trading day, or the session is lost during market hours (E6) | a valid session exists | blocks risk-increasing placement (K4(k)); cancel-on-entry is attempted but cannot succeed without a session, which is why risk-increasing orders carry a broker-side TTL (R8a) |
+| NOT_FLATTENABLE | the C9 sellability check fails (run pre-open and at every E4 run) | the next passing C9 check | blocks risk-increasing placement; cancel-on-entry |
+| NO_BACKSTOP | after a broker rejection of the GTT, part of the covered qty is covered neither by the armed GTT nor by an open platform sell (E9) | coverage restored by E9 maintenance | blocks risk-increasing placement; alert every 30 min |
+| INAV_UNAVAILABLE | no iNAV quote 60 s old or newer (D10) | an iNAV quote arrives | K4(d) and R8a use the LTP band; informational, never blocks |
+
+Flags never change `state`. They are evaluated at placement time (K4(k)) and at Decide time (§13.3 step 4).
+
+### C.4 Governor evaluation at one NAV mark
+
+A mark is **fresh** if every quote it uses is at most 60 s old; a stale mark records NAV, increments a stale counter (alert at 5 consecutive) and runs none of the steps below.
+
+1. `epoch_peak := max(epoch_peak, NAV)`; `ref_peak := max(ref_peak, NAV)`; compute epoch drawdown and reference drawdown (K0).
+2. If epoch drawdown ≤ −(`hard_drawdown_limit` − 3) and K1_EPOCH is not set: set K1_EPOCH.
+3. Else if reference drawdown ≤ `governor.halt` and K1_REF_HALT is not set: set K1_REF_HALT.
+4. Else if reference drawdown ≤ `governor.reduce` and K1_REF_REDUCE is not set: set K1_REF_REDUCE.
+5. If reference drawdown ≤ `governor.halve` and not `halved`: `halved := true`, journal. The trim is emitted by the next evening Decide step (§11.1), not by the mark.
+6. If reference drawdown > `governor.halve_release` and `halved`: `halved := false`, journal. The top-up is emitted by a later Decide step under the R8a re-emission rule and A2.
+
+Causes set in steps 2–4 are never cleared by a mark (K5: leaving REDUCING or HALTED is CLI-only). Steps 2–4 set at most one cause per mark; K1_EPOCH subsumes K1_REF_HALT, so a mark that reaches both sets only K1_EPOCH. In backtests, every mark is fresh.
+
+### C.5 Transition table
+
+| # | Event | Precondition | Actions |
+|---|---|---|---|
+| 1 | Fresh NAV mark | — | run C.4 |
+| 2 | Stale NAV mark | — | record NAV as stale; stale counter; alert at 5 consecutive |
+| 3 | **Cancel-on-entry** (fired whenever `state` rises, or UNPROTECTED or NOT_FLATTENABLE becomes set) | — | E5 order-book check, then cancel every open risk-increasing order; remainders end DROPPED_STATE, journaled and alerted. If the new state is HALTED, also cancel open strategy-exit and trim orders. Flattens, the E9 GTT and GTT-triggered orders are never cancelled by this event. |
+| 4 | K1_REF_HALT or K1_EPOCH set | — | #3; issue a flatten of every live bot position (A5, K5(v) sizing, E9 Coordination first); demote every live bot (C.7, two-step); alert |
+| 5 | CMD_FLATTEN set | second tap within 30 s (Telegram) or CLI | #3; issue a flatten of every live bot position |
+| 6 | K7 rule (1), (2) or (3) fires for bot *b* | *b* in APPROVE or AUTO and not `demotion_pending` | set K7; #3 for *b*; issue a flatten of *b*'s live position unless a K1 or CMD_FLATTEN flatten is already in flight; `b.demotion_pending := true` |
+| 7 | *b*'s live sub-ledger is flat and *b* has no open order | `b.demotion_pending` | `b.stage` one step down; `demotion_pending := false`; Paper → Approve clock restarts; the demotion cause is written on *b*'s next gate record |
+| 8 | A GTT fill is booked at an E4(0) sync | — | book as a tagged bot fill; set E9_BACKSTOP; if the resulting epoch drawdown is at the breach level, C.4 sets K1_EPOCH at the next mark |
+| 9 | Second consecutive unexplained E4 mismatch, or an untagged fill | — | set E4; #3 |
+| 10 | E4(0) sync fails | — | `sync_age` grows; no placement, modification or re-placement until a sync succeeds; alert at 3 consecutive failures; no cause changes |
+| 11 | Egress check fails | — | set E8 |
+| 12 | Storage write fails | — | set E1_STORAGE |
+| 13 | Session invalid during 09:05–close, or lost during market hours | — | set UNPROTECTED; #3 attempted; alert |
+| 14 | `/login` with a valid request token | M1 identity checks | `session := VALID`; clear UNPROTECTED; run E4 before any other action; E9 check and re-arm |
+| 15 | C9 check result | — | set or clear NOT_FLATTENABLE; #3 on set |
+| 16 | E9 maintenance result | — | set NO_BACKSTOP on a broker rejection that leaves units uncovered; clear it when coverage is restored |
+| 17 | CLI `clear-cause <c>` | `c` ≠ K1_EPOCH; per-cause precondition in C.2 | remove `c`; recompute `state`; journal. No orders are placed by this event; the next Decide step or placement opportunity acts on the new state |
+| 18 | CLI `new-epoch` | K1_EPOCH set; every live sub-ledger flat; no open bot order | remove K1_EPOCH; `epoch_id += 1`; `epoch_peak := ref_peak := NAV`; the §10 12-month clock restarts; every bot stays in PAPER and must re-pass Paper → Approve |
+| 19 | Evening Decide (§13.3 step 4) | signal inputs passed | governed target uses `halved`; if `state` ≠ ACTIVE or any blocking flag is set, no risk-increasing intent is emitted and `risk_state_blocked` is journaled once; risk-reducing intents (strategy exit, trim) are queued regardless and held under a pausing cause |
+| 20 | Placement attempt | C.6 gating | place, or end DROPPED_STATE, DROPPED_NO_TOKEN, DROPPED_DRIFT or DROPPED_CHECK |
+| 21 | Fill or partial fill | — | book the fill; E9 re-arm or raise per Coordination; a fresh NAV mark |
+| 22 | Gateway restart | — | rebuild in-flight orders by tag (E5); E4 before anything else; recompute flags; resume R8a |
+| 23 | Evening close-out (§13.3 step 6) | — | E9 arm for the covered qty; logout (`session := NONE`; UNPROTECTED applies only inside 09:05–close) |
+| 24 | Cash movement (CLI `cash-move`) | withdrawal ≤ platform cash | adjust capital; issue or redeem units at the last marked NAV (K0); journal `operator` |
+
+### C.6 Placement gating
+
+| Order kind | Allowed only if | Otherwise |
+|---|---|---|
+| Risk-increasing (entry, top-up) and drill buy | `state` = ACTIVE; no blocking flag; the bot has no `demotion_pending`; `session` = VALID; E8 not set; `sync_age` ≤ 120 s; inside the bot order window; K4 (a)–(h) pass; drift check passes at first placement; every modification re-checks `state` and flags | DROPPED_STATE, DROPPED_NO_TOKEN, DROPPED_DRIFT or DROPPED_CHECK, journaled and alerted |
+| Strategy exit, trim, drill sell | `session` = VALID; E8 not set; no pausing cause set; `sync_age` ≤ 120 s; inside the bot order window; K4 subset per K4(j) | held and re-issued under A5 |
+| Flatten (K1, CMD_FLATTEN, K7) | `session` = VALID; E8 not set; inside the normal market session (never pre-open or the closing auction); E1_STORAGE only diverts logging to the fallback file | waits for the next opportunity, alert every 30 min; the E9 GTT remains the backstop |
+| E9 GTT place, modify, delete | `session` = VALID; E8 not set | never blocked by any state or flag |
+| Cancel | `session` = VALID; E8 not set | impossible; the TTL expires risk-increasing orders at the broker |
+
+### C.7 Bot stage transitions
+
+| From | To | Trigger | Conditions |
+|---|---|---|---|
+| BACKTEST | PAPER | CLI `promote` | a signed Backtest → Paper gate record, or `promote --research` (A1) |
+| PAPER | APPROVE | CLI `promote` | a signed Paper → Approve record that is not `research_only`; B5 disjointness against bots in APPROVE or AUTO; the §10.2 prerequisites |
+| APPROVE | AUTO | CLI `promote` | parked (S4); a signed Approve → Auto record |
+| AUTO | APPROVE | K7 (1)–(3) | two-step (C.5 #6 then #7) |
+| APPROVE | PAPER | K7 (1)–(4) | two-step; the PAPER run starts flat; paper clock restarts |
+| PAPER or BACKTEST | BACKTEST (retired) | CLI `demote` | — |
+| APPROVE or AUTO | PAPER | CLI `demote` | treated as a K7 demotion (two-step) |
+
+A promotion is refused while any cause of HALTED severity is set, while K1_EPOCH is set, or while the bot has `demotion_pending`.
+
+### C.8 Backtest mapping
+
+| Live rule | Backtest behaviour |
+|---|---|
+| NAV mark at every reconciliation | one mark per session at the close; every mark is fresh |
+| CLI clear of K1_REF_* | simulated: after REDUCING or HALTED, ACTIVE resumes at the first entry signal at least `governor.backtest_cooloff_sessions` later, with `ref_peak := NAV` (K1) |
+| K1_EPOCH | set as live; never cleared (one epoch per backtest); the run continues under the resumption rule for reporting only and fails gate criterion (2) |
+| K7, E4, E8, E9_BACKSTOP, E1_STORAGE, CMD_* causes; all flags | never generated |
+| Session, sync, E9 GTT | always valid, always fresh, no GTT (the governor flatten is the only backstop) |
+| Order window | fills at the T+1 open plus R4 slippage (R8) |
+
+### C.9 Properties (the §13.7 property tests)
+
+Over any sequence of C.5 events:
+
+1. `state` always equals the derivation in C.1 from `causes`.
+2. A cause is removed only by the clearing action named in C.2; K1_EPOCH only by `new-epoch` with its preconditions.
+3. Whenever `state` rises, within one sync no risk-increasing order is open at the broker, unless `session` = NONE or E8 is set; at all times every open risk-increasing order carries a broker-side TTL ending no later than its `order_expiry`.
+4. A flatten is never blocked except under E8 or with `session` = NONE.
+5. `halved` becomes true only at a fresh mark with reference drawdown ≤ `halve`, and false only at a fresh mark with reference drawdown > `halve_release`; a fully invested position crossing `halve` produces a trim to 0.5 × the target at the next Decide.
+6. No risk-increasing order is placed, modified or re-placed unless `state` = ACTIVE, no blocking flag is set, `session` = VALID, E8 is not set and `sync_age` ≤ 120 s.
+7. Outside E8 and no-session periods, for every live (non-drill) ISIN: armed GTT qty + open platform sell qty ≥ covered qty, except during one R8a cancel-and-re-place gap of at most 60 s; NO_BACKSTOP stands in only after a broker rejection, never because of a cause.
+8. A platform sell is never sent while untriggered GTT qty + that sell's qty exceeds the covered qty; total open sell qty per ISIN never exceeds the K5(v) bound; external units are never sold; no same-session buy is sold.
+9. At every evening close-out an armed GTT covers the covered qty unless NO_BACKSTOP is set after a rejection.
+10. A demoted bot reaches PAPER only when flat with no open order, and never emits a risk-increasing intent while `demotion_pending`.
+11. Under a pausing cause no strategy exit or trim is placed; after the cause clears, every held exit is re-issued at the next placement opportunity.
+12. Under E8 no API call is made; under E1_STORAGE only cancels and flattens are sent, and each is written to the fallback file.
+13. A GTT fill always leaves E9_BACKSTOP set until a CLI clear, and no risk-increasing intent is emitted in between.
+14. `new-epoch` resets `epoch_peak` and `ref_peak` to NAV and leaves every bot in PAPER.
+15. In backtests, the epoch peak never resets and gate criterion (2) fails whenever K1_EPOCH was set.
+
