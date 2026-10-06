@@ -1,0 +1,23 @@
+Days when the ETF low crossed X% below its previous close while the Nifty low stayed above -3%:
+  X= 3%: 119 days since 2009; since 2015:  93; since 2020:  75; since 2023:   8
+  X= 5%:  68 days since 2009; since 2015:  56; since 2020:  46; since 2023:   0
+  X= 8%:  35 days since 2009; since 2015:  27; since 2020:  24; since 2023:   0
+  X=10%:  23 days since 2009; since 2015:  17; since 2020:  15; since 2023:   0
+  X=12%:  21 days since 2009; since 2015:  15; since 2020:  13; since 2023:   0
+Of the 8% cases, opening prints: 16 intraday: 19
+Since the ETF price-band norms of 7 Sep 2026: 18 sessions, worst ETF dip -1.7%, worst index dip -1.8%
+
+Worst 12 ETF-only prints since 2021:
+      date   prev   open    low  close  etf_dip  idx_dip
+2021-07-30 169.95 179.90 135.51 169.69    -20.3     -0.2
+2021-04-20 154.09 132.00 132.00 153.29    -14.3     -1.1
+2021-03-22 157.87 178.88 137.30 157.33    -13.0     -1.0
+2021-10-11 192.58 193.12 167.50 193.09    -13.0     -0.3
+2022-08-22 193.61 168.40 168.40 190.95    -13.0     -1.6
+2022-12-08 202.87 176.50 176.50 203.62    -13.0     -0.1
+2021-08-17 178.60 182.44 155.40 178.91    -13.0     -0.4
+2021-09-15 187.54 163.20 163.20 189.01    -13.0      0.0
+2022-05-11 176.16 153.30 153.30 175.34    -13.0     -1.5
+2021-04-01 157.16 137.05 137.05 158.70    -12.8      0.0
+2021-07-16 171.28 173.20 151.70 171.41    -11.4     -0.3
+2021-09-29 191.44 174.20 174.20 191.15     -9.0     -0.8
