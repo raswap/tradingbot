@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | v1.11 (hardened from v1.9 in two iterations; changes and decisions needed in Appendix B) |
+| Version | v1.12 (hardened from v1.9 in two iterations, decisions 1–3 taken; Appendix B) |
 | Date | 2026-09-30 |
 | Owner / sole user | Platform owner: a salaried staff software engineer in India, working solo |
 | Status | Hardened draft for owner review, then handoff to the implementing system |
@@ -207,7 +207,7 @@ So the platform optimises for **avoiding the known failure modes**: high turnove
 | | **Bot drawdown** (K3, K7) = bot sub-ledger NAV / its running maximum since the bot last entered its current live stage − 1. In S1 it coincides with epoch drawdown, because the one bot's live stage and the epoch start together. | |
 | | **Epoch drawdown** = NAV / running maximum NAV since the current epoch began − 1. T2 and §10 use it, and it never resets within an epoch. | |
 | | **Epoch:** the first epoch starts at the first live order. A new epoch starts only through the CLI `new-epoch` command (after a K1 epoch breach), which is journaled, restarts the §10 12-month clock, and permanently keeps the failed epoch's result in reports. `new-epoch` is refused while any live sub-ledger holds units or any bot order is open, and a `cash-move` withdrawal is refused beyond the platform's cash. | |
-| K1 | **Portfolio drawdown governor** (MUST NOT be disableable: no config key, CLI command or environment variable turns it off, and the only way to stop it is to stop the gateway, which also stops every order), measured on NAV against the reference peak. Evaluated at every NAV mark: each live reconciliation at LTP, and the close in backtests. That timing difference is accepted and documented. A level is reached when drawdown ≤ its threshold (at or beyond it); thresholds are in percentage points of the reference peak, and each level's release rule is stated with it below. A NAV mark uses quotes at most 60 s old; a mark on older quotes is recorded as stale, never triggers or releases a level, and 5 consecutive stale marks raise an alert. | S1 |
+| K1 | **Portfolio drawdown governor** (MUST NOT be disableable: no config key, CLI command or environment variable turns it off, and the only way to stop it is to stop the gateway, which also stops every order), measured on NAV against the reference peak. Evaluated at every NAV mark: each live reconciliation at LTP, and the close in backtests. That timing difference is accepted and documented. A level is reached when drawdown ≤ its threshold (at or beyond it); thresholds are in percentage points of the reference peak, and each level's release rule is stated with it below. A NAV mark uses quotes at most 60 s old; a mark on older quotes is recorded as stale, never triggers or releases a level, and 5 consecutive stale marks raise an alert. **Mark price:** an ETF is marked at its iNAV when one 60 s old or newer exists, otherwise at the LTP. **Confirmation:** a level is reached, and the halving released, only when two consecutive fresh marks at least 60 s apart are both at or beyond it. Exchange-recorded NIFTYBEES prints of 12% to 20% below fair value lasted seconds, not minutes (Appendix B, decision 9; `docs/research/2026-10-06-governor-backstop-gap-analysis.md`), and marking at the raw LTP would have halted the bot on them. The one-minute delay this adds to a genuine breach is accepted. The broker-side GTT (E9) still triggers at the exchange on the raw LTP, which is why a GTT fill halts until reviewed. | S1 |
 | | At −6% (`governor.halve`): the bot's effective `max_exposure` is multiplied by 0.5, both in the target ₹ formula (§11.1) and in the K4(b) cap. It is released only when drawdown recovers above `governor.halve_release` (default −3%), not at −6%, so that NAV oscillating around the threshold cannot produce a trim, a top-up and another trim in successive sessions (OD-5). The halving applies to the target, not to individual orders. | |
 | | At −10%: **REDUCING**. | |
 | | At **−12%: HALTED plus an automatic flatten to cash** (A5). | |
@@ -691,6 +691,7 @@ research:
   - execution: reconciliation mismatch, untagged manual fill, broker rejection, modification cap, gateway killed between the E9 GTT reduction and the sell placement, quote API down during the order window, token revoked mid-window, `live.sqlite` write failure, E4(0) sync failure, GTT fill while the platform is alive;
   - approvals: Telegram nonce reuse or late tap, iNAV unavailable;
   - pricing: one-sided quote, ETF outside the iNAV band at a reprice, exchange band narrower than the iNAV band;
+  - marks: a single LTP print 15% below iNAV lasting one mark (must not move the governor), a genuine two-mark breach (must);
   - settlement: the T1 sell block.
 
 ### 13.8 Recurring cost (S1)
@@ -747,11 +748,11 @@ The full multi-bot platform with the learning loop takes about **9–12 months p
 
 | ID | Decision | Default until decided |
 |---|---|---|
-| OD-1 | Owner's real hours per week | 10–12 |
+| OD-1 | Owner's real hours per week | **Decided (2026-10-05): 10–12.** |
 | OD-2 | APPROVE mechanism | **Decided: API order after Approve.** The Kite Publisher alternative (owner places each order manually) was rejected: A5 needs API exits and a static IP in S1 anyway, and Publisher can't enforce expiry, re-checks or idempotency. |
 | OD-3 | AUTO-stage broker | Kite for APPROVE; AUTO not planned in year 1 (S4 parked). If AUTO later moves to Dhan, the bot first needs at least 4 weeks of APPROVE on Dhan. Kite holdings run off at Kite, or move by off-market transfer (not sold). |
 | OD-4 | Can one static IP be registered at both brokers? | Not needed until S4 (Dhan requires a unique IP per person). |
-| OD-5 | Governor mechanism; keep −6/−10/−12? Keep the −3 release level for the halving? | `max_exposure` plus bot #1's trend filter; −6/−10/−12; halving released at −3 (K1) |
+| OD-5 | Governor mechanism; keep −6/−10/−12? Keep the −3 release level for the halving? | `max_exposure` plus bot #1's trend filter; −6/−10/−12; **halving released at −3, decided 2026-10-05.** |
 | OD-6 | Momentum at ₹2L: pick stocks (≤8 names at ₹25k minimum each) or time a momentum index fund? | Time the index fund, which keeps stock-universe work out of S2. |
 | OD-7 | Tax treatment of delivery trades (capital gains or business income), agreed with a CA before the first live trade | Capital gains. Recorded at the Paper → Approve gate. |
 | OD-8 | Scale-up rule | As in §10.2. Owner to confirm. |
@@ -761,7 +762,7 @@ The full multi-bot platform with the learning loop takes about **9–12 months p
 | OD-12 | Cash leg for bot #1 | **Cash (0%).** Conservative and creates no slab-rate tax items. LIQUIDBEES and liquid/overnight funds are later challengers (L4), priced after tax at the owner's marginal slab rate. They are taxed at slab rate (unverified standard rule; confirm with the CA). Note (v1.10): RM's cash half earns the liquid-fund return while the bot's cash earns 0%, so the bot is handicapped against its own benchmark for every session it spends in cash, and the Backtest → Paper gate is stricter than the signal alone implies. Revisit at the first gate run. |
 | OD-13 | Dhan data API price; Lightsail Mumbai price | Treat as unknown until quoted |
 | OD-14 | What to do if bot #1 fails Backtest → Paper | Decide when it happens. Options: a hysteresis or volatility-target challenger, bot #3 (low-vol ETF) as the first live bot, or staying on paper. |
-| OD-15 | S1 scope against hours (§14): accept the S1a/S1b split and a first live order in Mar–Apr 2027, or cut S1a scope to hold Feb–Mar 2027? Deferral candidates, in order of least damage: L4 to S2; the C7 hash chain to S1b; the D10 pre-2013 liquid-fund proxy to S1b (start RM in 2013 and report the 2007–12 span against BH only); X1 FIFO lots and R7 after-tax reporting to S1b, running the first Backtest → Paper gate pre-tax and re-running it after tax before Paper → Approve. | Accept the split and Mar–Apr 2027 |
+| OD-15 | **Decided (2026-10-05): the split and Mar–Apr 2027 accepted.** S1 scope against hours (§14): accept the S1a/S1b split and a first live order in Mar–Apr 2027, or cut S1a scope to hold Feb–Mar 2027? Deferral candidates, in order of least damage: L4 to S2; the C7 hash chain to S1b; the D10 pre-2013 liquid-fund proxy to S1b (start RM in 2013 and report the 2007–12 span against BH only); X1 FIFO lots and R7 after-tax reporting to S1b, running the first Backtest → Paper gate pre-tax and re-running it after tax before Paper → Approve. | Accept the split and Mar–Apr 2027 |
 
 ### 16.2 Facts to verify before relying on them
 
@@ -1080,6 +1081,18 @@ Five review passes (internal consistency, specification gaps, failure scenarios,
 7. D.1 step 8: benchmarks bear no transaction costs and are taxed once at LTCG over the chained span, which is the harder, honest bar; confirm.
 8. §11.1 tie-break order (less exposure before fewer switches); confirm or reverse.
 
+### v1.12 (2026-10-06): decisions 1 to 3 taken; evidence from market data
+
+Owner decisions recorded: 1 (S1a/S1b split and Mar–Apr 2027 accepted; 10–12 h/week confirmed as OD-1), 2 (halving released at −3% kept), 3 (a GTT fill halts until a CLI review, kept, now data-backed).
+
+Evidence added: `docs/research/2026-10-06-governor-backstop-gap-analysis.md` with normalised series under `data/research/` and scripts and outputs under `docs/research/analysis/`. Findings that changed the PRD or opened decisions:
+
+- **K1 mark price and two-mark confirmation (applied as a default, decision 9):** exchange-recorded NIFTYBEES prints of 12% to 20% below fair value on days the index barely moved would have halted a governor marked at the raw LTP 13 to 19 times in 17 years. NAV is now marked at the iNAV when fresh and a level needs two consecutive fresh marks. Appendix C.4 and C.9 updated.
+- **Gate criterion (2) is likely to fail as written (decision 10, open):** on the index, the governor halts 4 to 6 times in 19 years at full exposure and once at 70%; only 50% exposure never halts, and 50% cannot beat RM. Options: keep the criterion and accept the OD-14 path; allow at most one epoch breach per N years; evaluate over the last ten years only.
+- **GTT limit offset (decision 11, open):** a false trigger can fill up to 3% below the trigger into a thin book; a tighter offset (1% proposed) limits that damage but fills less reliably through a real gap.
+- **Exits into a gap-up:** 4 to 7 avoidable whipsaws in 19 years; a re-check of the signal at the open is recorded as the first L4 challenger, not a v1 change.
+- **Gaps:** no opening gap jumped through both −12% and −13.5% in 19 years; the worst gap met while invested was −3.5% (100-day filter) and −5.6% (200-day filter). The 3-point buffer stands. No weekday or holiday rule is warranted.
+
 ---
 
 # Appendix C: State machine (normative for K1, K5, K7, A5, E9)
@@ -1129,7 +1142,7 @@ Flags never change `state`. They are evaluated at placement time (K4(k)) and at 
 
 ### C.4 Governor evaluation at one NAV mark
 
-A mark is **fresh** if every quote it uses is at most 60 s old; a stale mark records NAV, increments a stale counter (alert at 5 consecutive) and runs none of the steps below.
+A mark is **fresh** if every quote it uses is at most 60 s old; a stale mark records NAV, increments a stale counter (alert at 5 consecutive) and runs none of the steps below. The mark price is the iNAV when fresh, else the LTP (K1). Steps 2 to 6 act only when the previous fresh mark, at least 60 s earlier, satisfied the same condition (two-mark confirmation, K1); in backtests the single session close counts as confirmed.
 
 1. `epoch_peak := max(epoch_peak, NAV)`; `ref_peak := max(ref_peak, NAV)`; compute epoch drawdown and reference drawdown (K0).
 2. If epoch drawdown ≤ −(`hard_drawdown_limit` − 3) and K1_EPOCH is not set: set K1_EPOCH.
@@ -1212,7 +1225,7 @@ Over any sequence of C.5 events:
 2. A cause is removed only by the clearing action named in C.2; K1_EPOCH only by `new-epoch` with its preconditions.
 3. Whenever `state` rises, within one sync no risk-increasing order is open at the broker, unless `session` = NONE or E8 is set; at all times every open risk-increasing order carries a broker-side TTL ending no later than its `order_expiry`.
 4. A flatten is never blocked except under E8 or with `session` = NONE.
-5. `halved` becomes true only at a fresh mark with reference drawdown ≤ `halve`, and false only at a fresh mark with reference drawdown > `halve_release`; a fully invested position crossing `halve` produces a trim to 0.5 × the target at the next Decide.
+5. `halved` becomes true only at the second of two consecutive fresh marks with reference drawdown ≤ `halve`, and false only at the second of two consecutive fresh marks with reference drawdown > `halve_release`; a single mark never changes it; a fully invested position crossing `halve` produces a trim to 0.5 × the target at the next Decide.
 6. No risk-increasing order is placed, modified or re-placed unless `state` = ACTIVE, no blocking flag is set, `session` = VALID, E8 is not set and `sync_age` ≤ 120 s.
 7. Outside E8 and no-session periods, for every live (non-drill) ISIN: armed GTT qty + open platform sell qty ≥ covered qty, except during one R8a cancel-and-re-place gap of at most 60 s; NO_BACKSTOP stands in only after a broker rejection, never because of a cause.
 8. A platform sell is never sent while untriggered GTT qty + that sell's qty exceeds the covered qty; total open sell qty per ISIN never exceeds the K5(v) bound; external units are never sold; no same-session buy is sold.

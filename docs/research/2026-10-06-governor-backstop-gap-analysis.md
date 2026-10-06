@@ -65,11 +65,71 @@ Mondays and post-holiday sessions carry wider tails but no negative average gap 
 
 ## 5. What was happening on those days
 
-See section 6, filled from recorded sources (Wikipedia current-events pages for every date; GDELT headlines for dates from 2017). The attribution output is `docs/research/analysis/event_attribution.json`.
+See section 6.
 
 ## 6. Event attribution
 
-(pending: the event attribution job is running; this section is filled in the next commit)
+Sources: Wikipedia Portal:Current events pages (business and economy, politics and elections sections) for the event day and the two days before; GDELT 2.0 DOC API headlines matching Sensex or Nifty on the event day (coverage from 2017). Raw output: `docs/research/analysis/event_attribution.json`.
+
+| Date | Event in the analysis | Recorded context (Wikipedia current events, business and politics sections, up to two days before) | Indian market headlines that day (GDELT, available from 2017) |
+|---|---|---|---|
+| 2008-10-29 | gap-up +6.4% | no economic entry found | before GDELT coverage |
+| 2011-08-09 | gap-down streak (3 days) | 2011-08-08: Stock markets in Asia, Australia, and the United States fall further after the credit rating of the United States is downgraded with the D; 2011-08-09: August 2011 stock markets fall | before GDELT coverage |
+| 2011-09-23 | gap-down streak | 2011-09-21: United Technologies Corporation announced that it reached an agreement to purchase Goodrich Corporation, manufacturer of spacecraft attitu; 2011-09-22: World stock markets plunge amid growing global fears of recession. (Sky News) | before GDELT coverage |
+| 2011-11-02 | governor halt, SMA100 | 2011-10-31: The Government of Japan intervenes to reduce the exchange rate of the Japanese yen with the United States dollar after the yen reached rec; 2011-10-31: US brokerage firm MF Global files for Chapter 11 bankruptcy after declaring £4bn of Eurozone debt exposure. (BBC) | before GDELT coverage |
+| 2012-07-23 | governor halt, SMA200 | 2012-07-23: Syria Foreign Ministry spokesman Jihad Makdissi declares that Syria has stockpiles of chemical and biological weapons and that it plans to | before GDELT coverage |
+| 2012-10-05 | index flash crash -16% intraday | 2012-10-04: Jordan's official news agency announces that King Abdullah dissolves parliament, paving the way for early elections. (BBC) | before GDELT coverage |
+| 2013-07-11 | exit into gap-up | no economic entry found | before GDELT coverage |
+| 2013-10-07 | governor halt, SMA200 | no economic entry found | before GDELT coverage |
+| 2013-11-11 | governor halt, SMA100 | no economic entry found | before GDELT coverage |
+| 2014-12-18 | exit into gap-up | no economic entry found | before GDELT coverage |
+| 2015-01-08 | exit into gap-up | no economic entry found | before GDELT coverage |
+| 2015-06-29 | governor halt, SMA200 | 2015-06-29: Puerto Rico government-debt crisis; 2015-06-29: Governor Alejandro García Padilla said the region has failed attempts and is unable to pay off the $72 billion debt. (USA Today) | before GDELT coverage |
+| 2015-08-12 | governor halt, SMA50 | 2015-08-11: The People's Bank of China devalues the Chinese yuan by two percent in an attempt to boost its economy, a move which could spark a currenc | before GDELT coverage |
+| 2015-10-28 | governor halt, SMA100 | 2015-10-26: USAA, one of the largest financial services companies in the U.S., announced the ending of its long-term relationship with MasterCard. The | before GDELT coverage |
+| 2016-11-09 | gap-down -5.6% | no economic entry found | before GDELT coverage |
+| 2016-11-16 | exit into gap-up | 2016-11-14: Aftermath of the Bulgarian presidential election, 2016; 2016-11-14: Bulgarian Prime Minister Boyko Borissov resigns as a result of Socialist-backed Rumen Radev winning the presidential election. (Reuters) | before GDELT coverage |
+| 2018-02-06 | gap-down -3.5% (worst while invested, SMA100) | 2018-02-05: The Wall Street stock market sheds 4.6% of its value, with the Dow Jones Industrial Average dropping a record 1,175 points at close. At on | Closing bell : After massacre at D - street , Sensex falls 561 pts , Nifty ends below 10 , 500 mark ; Sensex continues freefall , plunges by 1200 points Latest News - NewsNow . in |
+| 2018-06-20 | NIFTYBEES print -19% | no economic entry found | Tata Steel dispatches Ferro chrome from Gopalpur Industrial park Latest News - NewsNow . in; Sensex surges 261 points on global rebound ; RIL ends at record high Latest News - NewsNow . in |
+| 2018-12-11 | gap-down streak | 2018-12-10: The Governor of the Reserve Bank of India, Urjit Patel, resigns abruptly. (Reuters); 2018-12-09: 2018 Armenian parliamentary election | Market overlooks BJP poll defeat : Sensex , Nifty see a dip , but not a crash; Sensex down by over 500 points , rupee crashes 1 . 5 % following RBI governor resignation |
+| 2020-03-12 | gap-down -4.0% | 2020-03-12: Black Thursday, economic impact of the COVID-19 pandemic; 2020-03-12: All three major United States trading indexes fall 7% during early trading, leading to a 15-minute trading halt. They all closed over 9% d | no headline matched |
+| 2020-03-13 | gap-down -5.0%, then +3.8% close | no economic entry found | Market trading halted for 45 minutes after Nifty slides 10 %; BSE , NSE stop trading as panic grips stock markets |
+| 2020-03-16 | gap-down -3.7%, start of 6-day streak | 2020-03-14: Economic impact of the COVID-19 pandemic; 2020-03-14: Apple Inc. says it will close all of its stores outside China for two weeks in response to the coronavirus pandemic, according to its CEO  | no headline matched |
+| 2020-03-19 | gap-down -4.8% | 2020-03-17: Economic impact of the COVID-19 pandemic; 2020-03-18: Economic impact of the COVID-19 pandemic | Share Market Today LIVE / Sensex , Nifty , BSE , NSE , Share Prices , Stock Market News Updates Marc; Sensex , Nifty off 33 % from record high levels , key factors that pulled down Dalal Street |
+| 2020-03-23 | gap-down -9.1%, worst day -13% | no economic entry found | Sensex records worst day in history , crashes 3 , 934 points; Coronavirus wipes out Rs 14 lakh crore wealth as Sensex , Nifty log biggest session loss |
+| 2020-03-27 | gap-up +3.6% | no economic entry found | no headline matched |
+| 2020-04-07 | gap-up +4.5% after long weekend | no economic entry found | Sensex surges 1 , 500 points : Top stocks leading the bull charge today; These 87 stocks hit 52 - week lows on NSE even as Sensex , Nifty continue with bull run on D - Stree |
+| 2020-05-13 | gap-up +4.2% | no economic entry found | Share Market LIVE : Sensex climbs 1 , 400 points at pre - open , Nifty at 9 , 585 , Jubilant Life Sc; Closing Bell : Sensex , Nifty rise 2 % after PM Modi announces economic stimulus ; banks , autos gai |
+| 2020-05-26 | NIFTYBEES print -12% | no economic entry found | HDFC Bank , ITC lift Sensex over 400 points , Nifty tops 9 , 150 ; check what moving D - Street toda; Share Market LIVE : Sensex rises 350 points , Nifty at 9 , 125 ; JSW Steel , ITC , HDFC Bank top per |
+| 2020-06-12 | gap-down -3.6% | no economic entry found | Share Market Today LIVE / Sensex , Nifty , BSE , NSE , Share Prices , Stock Market News Updates June; Sensex , Nifty bounce back as US markets make a U - turn - The Hindu BusinessLine |
+| 2020-09-04 | NIFTYBEES print -15.6% | no economic entry found | no headline matched |
+| 2020-10-27 | NIFTYBEES opening print -13.6% | no economic entry found | no headline matched |
+| 2021-04-20 | NIFTYBEES opening print -14.3% | no economic entry found | Sensex and Nifty close with losses of around half a per cent; Share Market Updates : Sensex , Nifty Fall For Second Straight Session Dragged By IT Shares |
+| 2021-07-30 | NIFTYBEES print -20% | no economic entry found | Sensex Rockets 125 Points In Early Trade ; Nifty Tops 15 , 800; Share Market Updates : Sensex , Nifty End Flat ; Sun Pharma Surges Over 10 % On Strong Q1 Earnings |
+| 2022-02-25 | exit into gap-up | no economic entry found | Sensex gains over 1 , 100 points , Nifty rises more than 350 points to trade above 16 , 500; Sensex , Nifty regain losses after opening in green zone |
+| 2022-03-02 | gap-down streak | no economic entry found | no headline matched |
+| 2022-04-25 | governor halt, SMA50 | no economic entry found | Share Market LIVE : Sensex , Nifty likely to open lower today; Sensex tumbles 617 points , Nifty ends below 17 , 000 |
+| 2022-05-09 | gap-down streak | no economic entry found | no headline matched |
+| 2022-06-13 | gap-down streak | no economic entry found | no headline matched |
+| 2022-09-26 | governor halt, SMA200 | no economic entry found | no headline matched |
+| 2022-10-04 | exit into gap-up | no economic entry found | Sensex gains over 1000 points in early trade ; Nifty gains over 255 points; Share Market News Today Live : Sensex jumps over 800 points amid positive global cues , Nifty trades |
+| 2024-06-03 | gap-up +3.6% (Monday) | no economic entry found | Lok Sabha election result tomorrow : A look back at stock market performance on last 4 vote counting; Share Market Today LIVE Updates : Stock Market To Break Record ? GIFT Nifty Futures Rises Record Hig |
+| 2024-06-05 | exit into gap-up | no economic entry found | no headline matched |
+| 2025-04-07 | gap-down -5.0% (Monday) | no economic entry found | Sensex Today / Stock Market LIVE Updates : Sensex nosedives over 2 , 600 pts , Nifty below 22 , 000 ; Market Opening Bell : Sensex tanks over 3 , 900 points , Nifty down 5 per cent , all sectoral indice |
+| 2025-05-12 | exit into gap-up | no economic entry found | Market Opening Bell : Bulls roar on Dalal Street , Sensex surges 1 , 350 points , Nifty above 24 , 4; Weekly Musings – Index performance for week ended May 09 , 2025 |
+| 2025-06-13 | governor halt, SMA200 | no economic entry found | no headline matched |
+| 2026-02-03 | gap-up +4.9%, exit into gap-up | no economic entry found | no headline matched |
+| 2026-03-04 | gap-down streak | no economic entry found | no headline matched |
+| 2026-04-08 | gap-up +3.2% | 2026-04-07: Iran threatens to launch massive retaliatory strikes against the energy infrastructure of Saudi Arabia and the UAE in the event of a U.S. ; 2026-04-08: Tariffs in the second Trump administration | Market cheers ceasefire in biggest rally this year so far , Sensex jumps nearly 2 , 950 points; Nifty 50 , Sensex prediction today : Check how Indian stock market is expected to trade on 8 April a |
+
+**Reading the table** (interpretation, with the source of each claim):
+
+- **Global shocks explain most large gaps and most governor halts.** The August 2011 streak followed the downgrade of the United States' credit rating; September 2011 was a global recession scare; the August 2015 halt followed China's devaluation of the yuan; the February 2018 gap followed the record 1,175-point fall of the Dow the previous night; March 2020 was the pandemic crash, with the 13 March circuit-breaker halt and the 23 March lockdown session, the worst day in the index's history; the 2022 streaks sit on the invasion of Ukraine and the Federal Reserve's hikes; 7 April 2025 was the tariff crash; 8 April 2026 was the rally on a United States–Iran ceasefire. All of these are in the fetched records.
+- **Domestic shocks are rarer but real.** The 10 December 2018 resignation of the RBI governor is in the records. The −5.6% gap of 9 November 2016 and the June 2024 election days are known from the author's knowledge, not from the fetched records: demonetisation announced on the evening of 8 November 2016 together with the United States election result, and the exit polls and results of the Lok Sabha election on 3 and 4 June 2024 (GDELT confirms the exit-poll framing on 3 June).
+- **The ETF prints had no news behind them.** On 26 May 2020, 4 September 2020, 27 October 2020, 20 April 2021 and 30 July 2021 the same-day headlines describe ordinary or rising sessions. The prints were not reactions to events, which is what makes them false triggers for a stop on the last traded price.
+- **Governor halts on slow declines have no headline.** 23 July 2012, 7 October and 11 November 2013, 29 June and 28 October 2015, 25 April and 26 September 2022 are days when a long slide crossed the 12% line, not days with a single cause. A news feed would not have warned of them; the drawdown rules exist precisely for that.
+- **Unexplained in the records:** the +4.9% gap-up of 3 February 2026 and the March 2026 streak. The author's knowledge does not cover them reliably either.
+- **5 October 2012** was a flash crash caused by erroneous orders from one broker, from the author's knowledge; the records fetched do not mention it, and NIFTYBEES itself did not print the move.
 
 ## 7. Implications for the PRD
 

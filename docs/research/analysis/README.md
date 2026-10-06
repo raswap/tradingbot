@@ -10,3 +10,6 @@ Inputs are the normalised series in `data/research/`. Each `out_*.txt` file is t
 | `etf_prints.py etf.csv index.csv` | ETF prints far below the previous close on days the index barely moved (false-trigger risk for a GTT on last traded price). | `out_etf_prints.txt` |
 
 Conventions follow PRD v1.11: decision at close T, fill at the T+1 open with 5 bps slippage, no charges or tax, governor evaluated at the session low, backtest resumption after a cool-off of 20 sessions with the reference peak reset, one epoch per resumption.
+
+| `attribute_events.py` | For each event date, fetches the Wikipedia current-events page (event day and the day before) and GDELT headlines matching Sensex or Nifty (from 2017), spaced to GDELT's one-request-per-5-seconds limit. | `event_attribution.json` |
+| `wiki_business.py` | Refines the Wikipedia context to the business and politics sections over the two previous days and the event day, ranked by market relevance. | adds `wiki_business` to `event_attribution.json` |

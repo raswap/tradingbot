@@ -125,3 +125,11 @@ kite.trade, support.zerodha.com, nseindia.com and cleartax.in are still unreacha
 3. A runbook appendix with every CLI command, its preconditions and its journal entry, generated from Appendix C.
 4. Capacity and cost sanity: NIFTYBEES traded value against the ₹2L, ₹10L and ₹25L ramp before R9 is built.
 5. Primary-source verification of §16.2 from a network that can reach Zerodha and NSE.
+
+---
+
+# Decisions and evidence (2026-10-05/06): v1.11 → v1.12
+
+Owner decisions taken in discussion: 1 (S1a/S1b split, Mar–Apr 2027, 10–12 h/week), 2 (halving released at −3%), 3 (a GTT fill halts until review). Market data was fetched after the owner widened the environment's network policy: Nifty 50 and NIFTYBEES daily history, NSE bhavcopies for verification, Wikipedia current events and GDELT headlines for attribution. The evidence note is `docs/research/2026-10-06-governor-backstop-gap-analysis.md`; normalised data is under `data/research/`; scripts and outputs under `docs/research/analysis/`.
+
+PRD changes in v1.12: K1 mark price (iNAV first) and two-mark confirmation, with Appendix C.4 and C.9 and a §13.7 injection updated; OD-1, OD-5 and OD-15 marked decided; Appendix B v1.12 section with decisions 10 (gate criterion) and 11 (GTT limit offset) opened.
